@@ -25,3 +25,21 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   rewrite; created the private GitHub repo and pushed.
 - **Note:** Firecrawl web allowance was billing-blocked this session; research used Exa
   MCP + curl against GitHub/PyPI APIs. Recorded so future sessions do not thrash on it.
+
+## 2026-08-16 — Session 3 (monetization research + Phases 2-5)
+
+- **Model:** deepseek-v4-pro (build/synthesis), deepseek-v4-flash (3 research subagents).
+- **Research:** fan-out of 3 subagents (competitor pricing, market size + TDS-1035, OSS
+  monetization + grants). Persisted to `docs/MONETIZATION.md`. Key findings: SMB price
+  ceiling ₹4-7k/mo; "Gini" is not a recon vendor (removed); Paxcom is Paymentus-owned;
+  TDS code 1035 (ex-194O, 1-Apr-2026) is the sharpest demand wedge; grants are a
+  deferred harvest (₹0-5 lakh year-1).
+- **Built:** Phase 2 (recon parser + group_batches + match_orders), Phase 3 registry
+  (schemas.py), Phase 4 (saas/app.py FastAPI), Phase 5 (exceptions.py). Razorpay recon
+  schema verified via Wayback snapshot (D-14).
+- **Verified:** self-check 18/18; SaaS booted + exercised end-to-end (reconcile ->
+  exceptions -> Tally/GST/TDS-1035 exports) against sample files.
+- **Money wiring:** docs/COMMERCIAL.md (Sidekiq licensing), funding.json,
+  .github/FUNDING.yml, MASTER-PLAN competitive/monetization refresh.
+- **Deferred (honest):** Phase 3 vendor/bank column maps (needs real sample files);
+  SaaS hosting/auth (later-stage).

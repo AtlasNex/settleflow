@@ -7,3 +7,7 @@ build/
 venv/
 .idea/
 .vscode/
+
+# SaaS runtime artifacts (thin SaaS layer, not part of the library)
+saas/settleflow.db
+saas/upload_*.csv

@@ -7,12 +7,21 @@ just functional.
 
 ```
 settleflow/__init__.py
-  ├── from .models      import Match, MatchStatus, ReconResult, Settlement, Txn, normalize_utr
-  ├── from .matching    import match, match_settlements
-  └── from .parsers     import load_csv, parse_amount, parse_date, parse_razorpay_settlements
+  ├── from .models      import Match, MatchStatus, ReconResult, Settlement, Txn,
+  │                        ReconLine, BatchRecon, OrderMatch, OrderReconResult, normalize_utr
+  ├── from .matching    import match, match_settlements, group_batches, match_orders, normalize_ref
+  ├── from .parsers     import load_csv, parse_amount, parse_date,
+  │                        parse_razorpay_settlements, parse_razorpay_recon,
+  │                        load_razorpay_recon_json, load_recon_csv
+  ├── from .exports     import export_tally_csv, export_gst_worksheet, export_tds_1035
+  ├── from .exceptions  import Exception, classify, build_llm_prompt
+  └── from .schemas     import ColumnMap, ReconColumnMap, load_settlement_csv,
+                          load_bank_statement, load_vendor_recon_csv, *_MAPS
 
-settleflow/matching.py  -> from .models import Match, MatchStatus, ReconResult, Settlement, Txn
-settleflow/parsers.py   -> from .models import Settlement, Txn
+settleflow/matching.py  -> from .models import (…)
+settleflow/parsers.py   -> from .models import ReconLine, Settlement, Txn
+settleflow/exports.py   -> from .matching import group_batches
+settleflow/schemas.py   -> from .parsers import load_csv, load_recon_csv
 ```
 
 No circular imports. `models.py` imports nothing from the package.
@@ -42,6 +51,24 @@ No circular imports. `models.py` imports nothing from the package.
 2. Return `match(txns, bank)`. The `ref` (= settlement_id) rides through on the `Txn`
    so the caller still knows which batch matched.
 
+## `group_batches(lines) -> list[BatchRecon]`
+
+1. Insert each `ReconLine` into a dict keyed by `settlement_id` (defaulting a new
+   `BatchRecon` with `utr=line.settlement_utr`).
+2. Return the batches sorted by `settlement_id` (deterministic order).
+
+## `match_orders(lines, orders) -> OrderReconResult`
+
+1. Link refunds: for each `type == "refund"` line, if `payment_id` points at a
+   `payment` line, record a `(refund, payment)` tuple in `refund_links`.
+2. Partition `payment` lines and `adjustment` lines. Adjustments go straight to
+   `result.adjustments` (human review).
+3. Pass 1: for each payment line, join on `order_id` via `normalize_ref` (case+alnum).
+   Hit -> `EXACT` (amounts equal) or `AMOUNT_MISMATCH`; miss -> `pending`.
+4. Pass 2: rebuild `(amount, created_at)` index of free orders; join `pending` ->
+   `AMOUNT_DATE`; leftover -> `unmatched_lines`.
+5. `unmatched_orders` = orders never consumed. Consumption is by **list index**.
+
 ## `parse_razorpay_settlements(data) -> list[Settlement]`
 
 1. Iterate `data["items"]`.
@@ -51,19 +78,37 @@ No circular imports. `models.py` imports nothing from the package.
    `settlement_id`.
 4. Append `Settlement(...)`.
 
-## `load_csv(path, utr_col, amount_col, date_col, ref_col) -> list[Txn]`
+## `parse_razorpay_recon(data) -> list[ReconLine]`
 
-1. Open with `utf-8-sig` (handles BOM), `csv.DictReader`.
-2. For each row: `utr` = stripped value or `None`; `amount = parse_amount(row[amount_col])`;
-   `txn_date = parse_date(row[date_col])`; optional `ref`.
-3. Append `Txn(...)`.
+1. Require `data["items"]` to be a list, else `ValueError`.
+2. For each item: require `entity_id`, `type`, `settlement_id`, `created_at`; reject any
+   field outside `RAZORPAY_RECON_KEYS` + `{credit_type, posted_at}` (fail closed).
+3. Money (`debit/credit/amount/fee/tax`) is paise -> rupees via `_paise`; `created_at`/
+   `settled_at` are epoch -> UTC date (settled_at may be null).
+4. Build `ReconLine` and append.
 
-## `parse_date` / `parse_amount`
+## `classify(result, as_of, stale_after_days) -> list[Exception]`
 
-- `parse_date` tries five formats in order (`%Y-%m-%d`, `%d-%m-%Y`, `%d/%m/%Y`,
-  `%Y/%m/%d`, `%d.%m.%Y`); raises `ValueError` on all-miss.
-- `parse_amount` strips `,`, `₹`, `Rs`, `rs`, spaces; unwraps parenthesized negatives;
-  returns `Decimal`; raises `ValueError` on a bad value.
+Priority-ordered rules over a `ReconResult`:
+1. `AMOUNT_MISMATCH` matches -> `FEE_DRIFT`.
+2. settlement_only line with a bank_only line sharing (amount, date) -> `DUPLICATE_SUSPECT`.
+3. settlement_only older than `as_of - stale_after_days` -> `STALE_SETTLEMENT`.
+4. bank_only lines -> `DIRECT_TRANSFER`.
+5. remaining settlement_only -> `MANUAL_REVIEW`.
+
+## Exports
+
+- `export_tally_csv(result)` — one row per settlement side (matched / `PENDING_BANK` /
+  `UNEXPECTED_CREDIT`), shaped for Tally bank-receipt import.
+- `export_gst_worksheet(lines)` — per batch: gross, fee, tax-on-fee, refunds, net.
+- `export_tds_1035(lines, ...)` — per payment line: gross, code-1035 TDS (0.1%), net;
+  individuals/HUFs below ₹5L gross are `EXEMPT_BELOW_5L`.
+
+## SaaS flow (Phase 4)
+
+`POST /reconcile` (multipart) -> parse settlement (by kind) + bank CSV (explicit
+columns) -> `match`/`match_settlements` -> `classify` -> store run + generated CSVs in
+`saas/settleflow.db` (sqlite3) -> return summary + exception list + export URLs.
 
 ## Test flow
 

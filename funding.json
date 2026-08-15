@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "funding": {
+    "channels": [
+      {
+        "type": "GitHub",
+        "url": "https://github.com/sponsors/AtlasNex"
+      }
+    ]
+  },
+  "funding_by_project": {
+    "settleflow": {
+      "funding": {
+        "channels": [
+          {
+            "type": "GitHub",
+            "url": "https://github.com/sponsors/AtlasNex"
+          }
+        ]
+      }
+    }
+  }
+}

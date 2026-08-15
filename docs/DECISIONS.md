@@ -95,3 +95,45 @@ survived because the OSS component layer is genuinely un-owned.
   verification. Recorded so a future session does not thrash on a dead tool.
 - **Model:** deepseek-v4-pro (fallback) + deepseek-v4-flash (used Exa in subagents).
   **Date:** 2026-08-15.
+
+### D-14: Phase 2 schema verified via Wayback snapshot of the Razorpay recon docs
+- **Why:** Razorpay's live docs are JS-rendered (no schema in raw HTML) and Firecrawl
+  was billing-blocked. The June-2026 Wayback snapshot of
+  `razorpay.com/docs/api/settlements/fetch-recon/` served the full page, yielding the
+  **24 documented response parameters** of `GET /v1/settlements/recon/combined` and the
+  verbatim sample response. This is the verified schema for `parse_razorpay_recon`, not
+  a guess (D-7 satisfied).
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-16.
+
+### D-15: Recon parser is strict — unknown fields raise, never silently ignored
+- **Why:** the parser validates against the known key set and raises on unknown or
+  missing-required fields. If Razorpay adds a field, the parser fails loudly instead of
+  dropping data — the failure mode that corrupted Nova's zoning layer was silent
+  fabrication, so the opposite default (fail closed) is deliberate.
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-16.
+
+### D-16: Vendor/bank formats are a registry of column maps, data not code
+- **Why:** Phase 3 (Cashfree/PayU/PhonePe/Juspay + bank statements) cannot be built
+  without real sample files; their CSV headers are not verifiable from JS-rendered docs.
+  The registry (`settleflow/schemas.py`) ships the loader + empty slots that raise a
+  clear "needs a real sample" error instead of shipping a fabricated schema. This is the
+  correct D-7 posture: the *mechanism* is done, the *data* is DEFERRED pending real
+  samples. Never marked as done.
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-16.
+
+### D-17: The SaaS layer (saas/) may use FastAPI/uvicorn/Jinja2; the library stays stdlib-only
+- **Why:** CONSTRAINTS.md #6 (zero runtime deps) protects the library's installability
+  and the "MIT, zero-dependency" positioning. The thin SaaS is a separate optional
+  layer (`pyproject` `[project.optional-dependencies].saas`), so the core's zero-dep
+  invariant is preserved while the paid layer can use FastAPI + sqlite3 (stdlib).
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-16.
+
+### D-18: Monetization corrects the competitive table and ranks licensing #1
+- **Why:** research (2026-08-16) found (a) "Gini" is not a recon vendor — gini.co.in is
+  a Pune construction firm, so it is removed; (b) Paxcom is Paymentus-owned, not PayU;
+  (c) the SMB recon price ceiling is ₹4-7k/mo (ReconPe public pricing) with Zoho Books
+  anchoring the bundle at ₹749-899/mo; (d) the highest-leverage money move is
+  Sidekiq-style commercial licensing (OEM/white-label), not more SaaS seats. Full
+  evidence in `docs/MONETIZATION.md`. Grants are a deferred harvest (year-1 ₹0-5 lakh).
+- **Model:** deepseek-v4-pro (synthesis) + deepseek-v4-flash (3 research subagents).
+  **Date:** 2026-08-16.

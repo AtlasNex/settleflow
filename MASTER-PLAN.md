@@ -28,19 +28,28 @@ behind a paywall. That component layer is what we are building.
   rupees. Reconciling them means a currency-unit conversion is mandatory and easy to
   get wrong.
 
-## 3. Market / why now (evidence gathered 2026-08-15)
+## 3. Market / why now (evidence gathered 2026-08-15, refreshed 2026-08-16)
 
 | Fact | Number | Source |
 |---|---|---|
-| UPI volume (CY2025) | 228B transactions, ₹300 lakh crore | NPCI / Business Standard |
-| Live banks on UPI | 703 | NPCI/PIB |
-| Enterprise recon ownership | Gini, UnPay, ReconPe, Cointab, Paxcom | vendor pricing pages |
+| UPI volume (FY2025-26) | 24,162 crore txn (~241.6B), ~₹314 lakh crore | PIB / MoF release, Apr 2026 |
+| Live banks on UPI | 703 (Mar 2026) | PIB |
+| P2M share of UPI volume | 63% | PIB |
+| RBI-authorised Payment Aggregators | 82 (Aug 2026) | RBI CoA list |
+| Enterprise recon ownership | ReconPe, Cointab, UnPay, Paxcom (Paymentus) | vendor pricing pages |
 | Only OSS anywhere near this | Hyperswitch (43k stars) — infra-grade, config-bound, not SMB turnkey | GitHub |
-| New e-com TDS (code 1035) | in force 1 Apr 2026 under the new IT Act | IT Act 2025 |
+| New e-com TDS (payment code 1035) | in force 1 Apr 2026 under the new IT Act 2025 | IT Act 2025 / Terra Insight / TaxGarden |
 
 The gap is real at the **SMB layer** and the **component layer** is un-owned. The
 enterprise *platform* layer is crowded, which is exactly why we build the parsers +
 matching engine and a *thin* SaaS on top, not "another closed recon platform."
+
+**The sharpest demand trigger (added 2026-08-16):** the 1-Apr-2026 TDS
+re-codification — old s.194-O → new **s.393(1) Sl.8(v), payment code 1035** — forces
+every marketplace seller and every CA to re-map reconciliation config and match
+platform settlement ↔ Form 168/26Q ↔ Form 26AS on a quarterly cadence. That is a
+named-deadline reconciliation event, a stronger hook than the generic "saves 8-12
+hours" pain.
 
 ## 4. The reconciliation model (two levels)
 
@@ -58,39 +67,61 @@ Level 1 is built and tested. Level 2 is the immediate next increment; the Razorp
 | Piece | File | Status |
 |---|---|---|
 | Data model: `Txn`, `Match`, `MatchStatus`, `ReconResult`, `Settlement` | `settleflow/models.py` | done |
+| Data model: `ReconLine`, `BatchRecon`, `OrderMatch`, `OrderReconResult` | `settleflow/models.py` | done |
 | Matching engine: exact UTR -> amount+date fallback -> unmatched | `settleflow/matching.py` | done |
 | Settlement-level matcher | `settleflow/matching.py` (`match_settlements`) | done |
+| Line-item grouping + order-ledger matcher (Phase 2) | `settleflow/matching.py` (`group_batches`, `match_orders`) | done |
 | Generic CSV loader (explicit column mapping) | `settleflow/parsers.py` | done |
 | Razorpay settlement parser (real API schema; paise->rupee, epoch->date) | `settleflow/parsers.py` | done |
-| Self-check (7 checks, assert-based, no framework) | `tests/test_matching.py` | done |
+| Razorpay settlement-recon parser (24 documented params, strict schema check) | `settleflow/parsers.py` | done |
+| Vendor/bank column-map registry (Phase 3; verified slots + empty slots) | `settleflow/schemas.py` | done |
+| Exports: Tally CSV, GST worksheet, TDS-1035 worksheet | `settleflow/exports.py` | done |
+| Exception classifier + LLM-prompt builder (Phase 5) | `settleflow/exceptions.py` | done |
+| Thin SaaS: FastAPI reconcile/expose/export (Phase 4) | `saas/app.py` + templates | done |
+| Self-check (18 checks, assert-based, no framework) | `tests/test_matching.py` | done |
 
 ## 6. Roadmap
 
-| Phase | What | Depends on |
-|---|---|---|
-| 1 (done) | scaffold + data model + matching + Razorpay parser + self-check | - |
-| 2 | line-item decomposition (Razorpay Fetch Recon schema) | 1 |
-| 3 | more parsers: Cashfree, PayU, PhonePe, Juspay + bank statements (HDFC/SBI/ICICI/Axis/Kotak) | 1 |
-| 4 | thin hosted SaaS: auto-ingest, exception queue, Tally/Zoho/GST exports, e-com TDS 1035 | 3 |
-| 5 | agents on the unmatched 1-3% (LLM-assisted exception classification) | 4 |
+| Phase | What | Depends on | Status |
+|---|---|---|---|
+| 1 | scaffold + data model + matching + Razorpay parser + self-check | - | done |
+| 2 | line-item decomposition (Razorpay Fetch Recon schema) | 1 | done |
+| 3 | more parsers: Cashfree, PayU, PhonePe, Juspay + bank statements | real sample files | registry built; parser data DEFERRED (D-7: needs real samples) |
+| 4 | thin hosted SaaS: ingest, exception queue, Tally/GST/TDS-1035 exports | 3 | done (local; hosting deferred) |
+| 5 | exception classifier + optional LLM triage hook | 4 | done (rules + prompt builder; LLM call is a SaaS-layer concern) |
 
-## 7. Monetization (honest)
+## 7. Monetization (honest, refreshed 2026-08-16)
 
 - **OSS core (MIT) = trust + distribution.** The money is never in the code.
-- Thin SaaS at ₹4-7k/mo, sold through CAs/bookkeepers (the channel ReconPe proved).
-- Consulting: an EY Band-5 urban-planner/founder + a real payments-OSS repo is a
+- **#1 lever: Sidekiq-style commercial license for embedding** (white-label/OEM to
+  fintechs and CA software vendors, per-deployment or revenue-share). This decouples
+  revenue from our own SaaS signups — the only move that genuinely raises the ceiling.
+- **Thin SaaS at ₹4-7k/mo through CAs** — but re-bundled to beat the ₹749-899/mo Zoho
+  Books anchor: UPI/NPCI-specific matching, bank-statement packs, Tally bridge, and
+  audit-grade TDS-1035 output justify the premium. Plus a ₹20-50k/mo support retainer.
+- **Consulting:** an EY Band-5 urban-planner/founder + a real payments-OSS repo is a
   differentiated bidder for reconciliation/ops work.
-- Grants: Zerodha FLOSS/fund ($10k-100k), GitHub Secure Open Source Fund ($10k).
+- **Grants (deferred harvest):** Zerodha FLOSS/fund ($10k-100k/project, excludes new
+  projects) and GitHub Secure Open Source Fund (~$10k/project) only become eligible
+  after real adoption. Realistic year-1 grants: ₹0-5 lakh. `funding.json` +
+  `.github/FUNDING.yml` are in the repo now (near-zero cost, also the FLOSS/fund
+  application artifact).
 - **Honest expectation:** 12-24 months to meaningful revenue. Do not build this
   expecting to quit the day job. The first 6-12 months are reputation + distribution.
+  Full evidence in `docs/MONETIZATION.md`.
 
 ## 8. Competitive landscape (condensed)
 
 | Player | What | Why we still win |
 |---|---|---|
 | Hyperswitch (Juspay) | open-source payment orchestration + recon module | infra-grade, config-bound per merchant, Juspay's own schema, not SMB turnkey |
-| ReconPe / Synaptic / Gini / Cointab / Paxcom | closed recon SaaS | they re-implement the parsers privately; no OSS component layer |
-| Razorpay Optimizer / RazorpayX | gateway-bundled recon | vendor lock-in; only works if you route via them |
+| ReconPe (₹3,999-6,999/mo) / Synaptic AI Lab (₹3,999/mo) | self-serve SMB recon SaaS | they re-implement the parsers privately; no OSS component layer |
+| Cointab ($149-749/mo) | volume-tiered recon SaaS | USD-priced, mid-market finance teams, not SMB or OSS |
+| Paxcom (Paymentus) / UnPay | enterprise recon, sales-led | ₹100-500 Cr revenue, NDA-bound, no OSS |
+| Razorpay Optimizer / RazorpayX | gateway-bundled recon | gives recon away to defend 2% txn fees; vendor lock-in |
+
+*(Removed "Gini" — gini.co.in is a Pune construction firm, not a recon vendor.
+Corrected Paxcom ownership to Paymentus, not PayU. See `docs/MONETIZATION.md`.)*
 
 ## 9. Decisions index
 

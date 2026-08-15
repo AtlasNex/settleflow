@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import csv
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from .models import Settlement, Txn
+from .models import ReconLine, Settlement, Txn
 
 _DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y")
 
@@ -97,3 +98,133 @@ def parse_razorpay_settlements(data: dict) -> list[Settlement]:
             )
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Settlement recon report (per-transaction line items) — verified schema.
+#
+# GET /v1/settlements/recon/combined — the 24 documented response parameters
+# (verified against the docs page 2026-08-16 via Wayback snapshot of
+# razorpay.com/docs/api/settlements/fetch-recon). Money fields arrive as
+# integers in PAISE; created_at/settled_at are epoch seconds. `credit_type`
+# appears in the docs example but is not among the 24 documented params.
+# ---------------------------------------------------------------------------
+
+RAZORPAY_RECON_KEYS = frozenset({
+    "entity_id", "type", "debit", "credit", "amount", "currency", "fee",
+    "tax", "on_hold", "settled", "created_at", "settled_at", "settlement_id",
+    "description", "notes", "payment_id", "settlement_utr", "order_id",
+    "order_receipt", "method", "card_network", "card_issuer", "card_type",
+    "dispute_id",
+})
+RAZORPAY_RECON_REQUIRED = ("entity_id", "type", "settlement_id", "created_at")
+
+
+def parse_razorpay_recon(data: dict) -> list[ReconLine]:
+    """Parse a Razorpay 'Fetch Settlement Recon Details' response.
+
+    Schema = the 24 documented response parameters. Money is in paise
+    (converted to rupees); created_at/settled_at are epoch seconds.
+    Raises ValueError on an unknown top-level shape or an item missing
+    required keys — never guesses (D-7).
+    """
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise ValueError("razorpay recon response must be a dict with an 'items' list")
+    out: list[ReconLine] = []
+    for item in items:
+        missing = [k for k in RAZORPAY_RECON_REQUIRED if k not in item]
+        if missing:
+            raise ValueError(f"recon line missing required keys: {missing}")
+        unknown = set(item) - RAZORPAY_RECON_KEYS - {"credit_type", "posted_at"}
+        if unknown:
+            raise ValueError(f"unknown recon fields {sorted(unknown)} — schema changed?")
+        settled_at = item.get("settled_at")
+        out.append(
+            ReconLine(
+                entity_id=item["entity_id"],
+                type=item["type"],
+                debit=_paise(item.get("debit", 0)),
+                credit=_paise(item.get("credit", 0)),
+                amount=_paise(item.get("amount", 0)),
+                currency=item.get("currency", "INR"),
+                fee=_paise(item.get("fee", 0)),
+                tax=_paise(item.get("tax", 0)),
+                on_hold=bool(item.get("on_hold", False)),
+                settled=bool(item.get("settled", False)),
+                created_at=_epoch_date(item["created_at"]),
+                settled_at=_epoch_date(settled_at) if settled_at else None,
+                settlement_id=item["settlement_id"],
+                credit_type=item.get("credit_type"),
+                description=item.get("description"),
+                notes=item.get("notes"),
+                payment_id=item.get("payment_id"),
+                settlement_utr=item.get("settlement_utr"),
+                order_id=item.get("order_id"),
+                order_receipt=item.get("order_receipt"),
+                method=item.get("method"),
+                card_network=item.get("card_network"),
+                card_issuer=item.get("card_issuer"),
+                card_type=item.get("card_type"),
+                dispute_id=item.get("dispute_id"),
+            )
+        )
+    return out
+
+
+def load_razorpay_recon_json(path: str | Path) -> list[ReconLine]:
+    """Load a saved recon API response JSON file from disk."""
+    with open(path, encoding="utf-8") as fh:
+        return parse_razorpay_recon(json.load(fh))
+
+
+def load_recon_csv(
+    path: str | Path,
+    *,
+    entity_id_col: str,
+    type_col: str,
+    debit_col: str,
+    credit_col: str,
+    amount_col: str,
+    date_col: str,
+    settlement_id_col: str,
+    currency_col: str | None = None,
+    fee_col: str | None = None,
+    tax_col: str | None = None,
+    utr_col: str | None = None,
+    order_id_col: str | None = None,
+    payment_id_col: str | None = None,
+) -> list[ReconLine]:
+    """Load a dashboard-exported recon CSV into ReconLine rows.
+
+    Column names are EXPLICIT arguments (D-7): every vendor's CSV header
+    differs, so the mapping is supplied from a real sample file, never
+    guessed. Money columns must already be in rupees.
+    """
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        out: list[ReconLine] = []
+        for row in reader:
+            fee = parse_amount(row[fee_col]) if fee_col and row.get(fee_col) else Decimal("0")
+            tax = parse_amount(row[tax_col]) if tax_col and row.get(tax_col) else Decimal("0")
+            out.append(
+                ReconLine(
+                    entity_id=(row.get(entity_id_col) or "").strip(),
+                    type=(row.get(type_col) or "").strip().lower(),
+                    debit=parse_amount(row[debit_col]),
+                    credit=parse_amount(row[credit_col]),
+                    amount=parse_amount(row[amount_col]),
+                    currency=(row.get(currency_col) or "INR").strip() if currency_col else "INR",
+                    fee=fee,
+                    tax=tax,
+                    on_hold=False,
+                    settled=True,
+                    created_at=parse_date(row[date_col]),
+                    settled_at=None,
+                    settlement_id=(row.get(settlement_id_col) or "").strip(),
+                    settlement_utr=(row.get(utr_col) or "").strip() or None if utr_col else None,
+                    order_id=(row.get(order_id_col) or "").strip() or None if order_id_col else None,
+                    payment_id=(row.get(payment_id_col) or "").strip() or None if payment_id_col else None,
+                )
+            )
+        return out

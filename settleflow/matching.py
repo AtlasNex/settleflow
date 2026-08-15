@@ -4,7 +4,17 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import Decimal
 
-from .models import Match, MatchStatus, ReconResult, Settlement, Txn
+from .models import (
+    BatchRecon,
+    Match,
+    MatchStatus,
+    OrderMatch,
+    OrderReconResult,
+    ReconLine,
+    ReconResult,
+    Settlement,
+    Txn,
+)
 
 
 def match(settlements: list[Txn], bank: list[Txn]) -> ReconResult:
@@ -86,3 +96,98 @@ def match_settlements(settlements: list[Settlement], bank: list[Txn]) -> ReconRe
         for s in settlements
     ]
     return match(txns, bank)
+
+
+# ---------------------------------------------------------------------------
+# Level 2: line-item decomposition. Recon lines -> settlement batches,
+# gross/fee/tax/refund netting, and matching against the merchant's own
+# order ledger (order_id -> order row). Deterministic, Decimal throughout.
+# ---------------------------------------------------------------------------
+
+def group_batches(lines: list[ReconLine]) -> list[BatchRecon]:
+    """Group recon lines into one BatchRecon per settlement_id."""
+    batches: dict[str, BatchRecon] = {}
+    for line in lines:
+        batch = batches.setdefault(
+            line.settlement_id,
+            BatchRecon(settlement_id=line.settlement_id, utr=line.settlement_utr),
+        )
+        batch.lines.append(line)
+    return [batches[k] for k in sorted(batches)]
+
+
+def match_orders(lines: list[ReconLine], orders: list[Txn]) -> OrderReconResult:
+    """Match per-transaction recon lines against the merchant order ledger.
+
+    orders: merchant-side rows, Txn(ref=order_id, amount=gross order amount,
+    txn_date=order date). Pass 1 joins on order_id (exact ref), pass 2 falls
+    back to (amount, date). Refund lines are linked to their originating
+    payment line via payment_id instead of the order ledger. Adjustment lines
+    are kept separately for human review. Amounts compared in rupees.
+    """
+    result = OrderReconResult()
+
+    # Refund -> payment linkage (payment_id points at the original payment).
+    by_entity: dict[str, ReconLine] = {l.entity_id: l for l in lines if l.entity_id}
+    for line in lines:
+        if line.type == "refund" and line.payment_id:
+            src = by_entity.get(line.payment_id)
+            if src is not None and src.type == "payment":
+                result.refund_links.append((line, src))
+
+    payment_lines = [l for l in lines if l.type == "payment"]
+    adjustments = [l for l in lines if l.type == "adjustment"]
+    result.adjustments.extend(adjustments)
+
+    orders_by_ref: dict[str, list[int]] = defaultdict(list)
+    for i, o in enumerate(orders):
+        if o.ref:
+            orders_by_ref[normalize_ref(o.ref)].append(i)
+    consumed: set[int] = set()
+
+    def take_order(ref: str | None, amount: Decimal) -> tuple[Txn, bool] | None:
+        if not ref:
+            return None
+        for i in orders_by_ref.get(normalize_ref(ref), []):
+            if i not in consumed:
+                consumed.add(i)
+                return orders[i], orders[i].amount == amount
+        return None
+
+    pending: list[ReconLine] = []
+    for line in payment_lines:
+        hit = take_order(line.order_id, line.amount)
+        if hit is not None:
+            order, same_amount = hit
+            result.matched.append(
+                OrderMatch(line, order, MatchStatus.EXACT if same_amount else MatchStatus.AMOUNT_MISMATCH)
+            )
+            continue
+        pending.append(line)
+
+    # Amount + date fallback among the still-free orders.
+    by_amount_date: dict[tuple[Decimal, object], list[int]] = defaultdict(list)
+    for i, o in enumerate(orders):
+        if i not in consumed:
+            by_amount_date[(o.amount, o.txn_date)].append(i)
+    for line in pending:
+        hit_i = None
+        for i in by_amount_date.get((line.amount, line.created_at), []):
+            if i not in consumed:
+                hit_i = i
+                consumed.add(i)
+                break
+        if hit_i is not None:
+            result.matched.append(OrderMatch(line, orders[hit_i], MatchStatus.AMOUNT_DATE))
+        else:
+            result.unmatched_lines.append(line)
+
+    result.unmatched_orders = [o for i, o in enumerate(orders) if i not in consumed]
+    return result
+
+
+def normalize_ref(value: str | None) -> str:
+    """Normalize an order ref the same way UTRs are normalized."""
+    if not value:
+        return ""
+    return "".join(ch for ch in value if ch.isalnum()).upper()
