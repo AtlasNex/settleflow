@@ -367,6 +367,22 @@ def test_sbi_bank_statement_parse():
     assert txns[1].amount == Decimal("5000.00")
 
 
+def test_sbi_tab_separated_xls_parse():
+    # SBI's native "CSV" download is actually tab-separated ".xls" text.
+    # The loader must sniff the delimiter and still parse it.
+    lines = [
+        "Txn Date\tValue Date\tDescription\tRef No./Cheque No.\tDebit\tCredit\tBalance",
+        "07/03/2026\t07/03/2026\tIMPS/416000123456/UPI-ZOMATO\t416000123456\t350.00\t\t199650.00",
+        "08/03/2026\t08/03/2026\tUPI CREDIT\t99887766\t\t250.00\t199900.00",
+    ]
+    p = _write(Path(tmp_dir()) / "sbi.xls", "\n".join(lines))
+    txns = load_bank_statement(str(p), "sbi")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("-350.00")
+    assert txns[1].amount == Decimal("250.00")
+    assert txns[1].utr == "99887766"
+
+
 def test_axis_bank_statement_parse():
     csv = (
         "Tran Date,CHQNO,PARTICULARS,DR,CR,BAL,SOL\n"

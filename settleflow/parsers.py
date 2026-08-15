@@ -118,8 +118,17 @@ def load_bank_statement_csv(
     debit_col + credit_col rather than assuming row 0.
     """
     required = {date_col, debit_col, credit_col}
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        rows = list(csv.reader(fh))
+    raw = Path(path).read_text(encoding="utf-8-sig")
+
+    # Auto-detect the delimiter. SBI's native "CSV" export is actually a
+    # tab-separated ".xls"; HDFC/ICICI/Axis/Kotak are comma CSVs. Sniffing
+    # covers both without per-bank code.
+    try:
+        dialect = csv.Sniffer().sniff(raw[:4096], delimiters=",\t;|")
+    except csv.Error:
+        dialect = csv.excel  # fall back to comma
+
+    rows = list(csv.reader(raw.splitlines(), dialect))
 
     header_i = None
     for i, row in enumerate(rows):
