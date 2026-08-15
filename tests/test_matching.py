@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from upirecon import MatchStatus, Txn, match, match_settlements, parse_razorpay_settlements
+from settleflow import MatchStatus, Txn, match, match_settlements, parse_razorpay_settlements
 
 
 def t(utr, amount, day, ref=None):

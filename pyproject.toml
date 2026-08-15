@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "upirecon"
+name = "settleflow"
 version = "0.1.0"
 description = "Open-source UPI/NPCI settlement reconciliation library for India"
 readme = "README.md"
@@ -13,4 +13,4 @@ authors = [{ name = "Sanjay R.U. Kumar" }]
 dependencies = []
 
 [tool.setuptools.packages.find]
-include = ["upirecon*"]
+include = ["settleflow*"]

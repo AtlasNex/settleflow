@@ -1,4 +1,4 @@
-"""upirecon: open-source UPI/NPCI settlement reconciliation for India."""
+"""settleflow: open-source UPI/NPCI settlement reconciliation for India."""
 
 from .models import Match, MatchStatus, ReconResult, Settlement, Txn, normalize_utr
 from .matching import match, match_settlements

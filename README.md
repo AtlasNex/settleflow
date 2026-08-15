@@ -1,4 +1,4 @@
-# upirecon (working name)
+# settleflow (working name)
 
 Open-source UPI/NPCI settlement reconciliation for India.
 
@@ -34,7 +34,7 @@ python tests/test_matching.py
 from datetime import date
 from decimal import Decimal
 
-from upirecon import Txn, match
+from settleflow import Txn, match
 
 settlements = [Txn("123456789012", Decimal("100.00"), date(2026, 8, 15), ref="order_1")]
 bank = [Txn("123456789012", Decimal("100.00"), date(2026, 8, 16))]
