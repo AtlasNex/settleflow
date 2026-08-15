@@ -1,5 +1,6 @@
 """Self-check for the library. Run: python tests/test_matching.py"""
 import sys
+import tempfile
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -15,12 +16,21 @@ from settleflow import (
     export_tally_csv,
     export_tds_1035,
     group_batches,
+    load_bank_statement,
+    load_settlement_csv,
+    load_vendor_recon_csv,
     match,
     match_orders,
     match_settlements,
     parse_razorpay_recon,
     parse_razorpay_settlements,
 )
+
+_TMP = Path(tempfile.mkdtemp(prefix="settleflow-test-"))
+
+
+def tmp_dir() -> Path:
+    return _TMP
 
 
 def t(utr, amount, day, ref=None):
@@ -314,6 +324,167 @@ def test_build_llm_prompt():
     prompt = build_llm_prompt(classify(r, as_of=date(2026, 8, 20)))
     assert "reconciling UPI settlement" in prompt
     assert "FEE_DRIFT" in prompt
+
+
+# ---- Phase 3: bank-statement + vendor CSV parsers (verbatim headers) ----
+
+def _write(path, text):
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_hdfc_bank_statement_parse():
+    csv = (
+        "HDFC Bank Limited\n"
+        "Account No: 1234\n"
+        "Date,Narration,Chq./Ref.No.,Value Dt,Withdrawal Amt.,Deposit Amt.,Closing Balance\n"
+        "01/07/26,UPI-RAHUL SHARMA-RAHUL@OKAXIS-123456,0000112233,01/07/26,250.00,,10450.25\n"
+        "02/07/26,SALARY CREDIT,,02/07/26,,85000.00,95450.25\n"
+    )
+    p = _write(Path(tmp_dir()) / "hdfc.csv", csv)
+    txns = load_bank_statement(str(p), "hdfc")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("-250.00")   # withdrawal -> negative
+    assert txns[0].utr == "0000112233"
+    assert txns[0].txn_date == date(2026, 7, 1)
+    assert txns[1].amount == Decimal("85000.00")  # deposit -> positive
+    assert txns[1].ref == "SALARY CREDIT"
+
+
+def test_sbi_bank_statement_parse():
+    csv = (
+        "Txn Date,Value Date,Description,Ref No./Cheque No.,Debit,Credit,Balance\n"
+        "07/03/2026,07/03/2026,IMPS/416000123456/UPI-ZOMATO,416000123456,350.00,,199650.00\n"
+        "08/03/2026,08/03/2026,OPENING BALANCE,,,,\n"
+        "09/03/2026,09/03/2026,NEFT CREDIT,99887766,,5000.00,204650.00\n"
+    )
+    p = _write(Path(tmp_dir()) / "sbi.csv", csv)
+    txns = load_bank_statement(str(p), "sbi")
+    # OPENING BALANCE row (both empty) is skipped
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("-350.00")
+    assert txns[0].utr == "416000123456"
+    assert txns[1].amount == Decimal("5000.00")
+
+
+def test_axis_bank_statement_parse():
+    csv = (
+        "Tran Date,CHQNO,PARTICULARS,DR,CR,BAL,SOL\n"
+        "05-01-2026,,UPI/TRANSFER/123456,,200.00,10500.00,SOL123\n"
+        "06-01-2026,000045,POS DEBIT,150.00,,10350.00,SOL123\n"
+    )
+    p = _write(Path(tmp_dir()) / "axis.csv", csv)
+    txns = load_bank_statement(str(p), "axis")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("200.00")   # CR -> positive
+    assert txns[1].amount == Decimal("-150.00")  # DR -> negative
+    assert txns[1].txn_date == date(2026, 1, 6)
+
+
+def test_kotak_bank_statement_parse():
+    csv = (
+        "Transaction Date,Description,Chq./Ref.No.,Withdrawal Amt.,Deposit Amt.,Closing Balance\n"
+        "01-04-2026,UPI PAYMENT,123456789,99.00,,501.00\n"
+        "02-04-2026,REFUND RECEIVED,,,199.00,700.00\n"
+    )
+    p = _write(Path(tmp_dir()) / "kotak.csv", csv)
+    txns = load_bank_statement(str(p), "kotak")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("-99.00")
+    assert txns[1].amount == Decimal("199.00")
+
+
+def test_icici_bank_statement_parse():
+    csv = (
+        "S No.,Value Date,Transaction Date,Cheque Number,Transaction Remarks,Withdrawal Amount(INR),Deposit Amount(INR),Balance(INR)\n"
+        "1,02-Jan-2024,01-Jan-2024,,UPI CREDIT,,1500.00,1500.00\n"
+        "2,03-Jan-2024,02-Jan-2024,000111,ATM WITHDRAWAL,500.00,,1000.00\n"
+    )
+    p = _write(Path(tmp_dir()) / "icici.csv", csv)
+    txns = load_bank_statement(str(p), "icici")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("1500.00")
+    assert txns[1].amount == Decimal("-500.00")
+    assert txns[0].txn_date == date(2024, 1, 1)
+
+
+def test_razorpay_settlement_csv_parse():
+    csv = (
+        "id,amount,status,fees,tax,utr,created_at\n"
+        "setl_K4eBPTyLTnLCGr,1.91,processed,0.0,0.0,sample utr,2022-12-08T13:26:44\n"
+    )
+    p = _write(Path(tmp_dir()) / "rzp_settle.csv", csv)
+    txns = load_settlement_csv(str(p), "razorpay_settlement_csv")
+    assert len(txns) == 1
+    assert txns[0].ref == "setl_K4eBPTyLTnLCGr"
+    assert txns[0].amount == Decimal("1.91")
+    assert txns[0].utr == "sample utr"
+    assert txns[0].txn_date == date(2022, 12, 8)
+
+
+def test_razorpay_recon_csv_parse():
+    # 27 columns, verbatim from the official sample header (docs/SCHEMAS.md).
+    # Build with DictWriter so column alignment cannot drift.
+    import csv as _csv
+    import io as _io
+    fields = [
+        "transaction_entity", "entity_id", "amount", "currency", "fee (exclusive tax)",
+        "tax", "debit", "credit", "payment_method", "card_type", "issuer_name",
+        "entity_created_at", "payment_captured_at", "payment_notes", "refund_notes",
+        "arn", "entity_description", "order_id", "order_receipt", "order_notes",
+        "dispute_id", "dispute_created_at", "dispute_reason", "settlement_id",
+        "settled_at", "settlement_utr", "settled_by",
+    ]
+    row = dict.fromkeys(fields, "")
+    row.update({
+        "transaction_entity": "payment",
+        "entity_id": "pay_JpAZjJN9O1lKuG",
+        "amount": "1.0",
+        "currency": "INR",
+        "fee (exclusive tax)": "0.01",
+        "tax": "0.0",
+        "debit": "0.0",
+        "credit": "0.99",
+        "payment_method": "bank_transfer",
+        "entity_created_at": "2022-06-07T13:33:57",
+        "settlement_id": "setl_Jq0XZksg0i2Fat",
+        "settled_at": "2022-06-07T13:33:57",
+        "settlement_utr": "sample utr",
+        "settled_by": "Razorpay",
+    })
+    buf = _io.StringIO()
+    w = _csv.DictWriter(buf, fieldnames=fields)
+    w.writeheader()
+    w.writerow(row)
+    p = _write(Path(tmp_dir()) / "rzp_recon.csv", buf.getvalue())
+    lines = load_vendor_recon_csv(str(p), "razorpay_recon_csv")
+    assert len(lines) == 1
+    l = lines[0]
+    assert l.type == "payment"
+    assert l.entity_id == "pay_JpAZjJN9O1lKuG"
+    assert l.amount == Decimal("1.0")
+    assert l.credit == Decimal("0.99")
+    assert l.fee == Decimal("0.01")
+    assert l.settlement_id == "setl_Jq0XZksg0i2Fat"
+    assert l.settlement_utr == "sample utr"
+
+
+def test_bank_statement_unknown_bank_raises():
+    p = _write(Path(tmp_dir()) / "x.csv", "a,b,c\n1,2,3\n")
+    try:
+        load_bank_statement(str(p), "notabank")
+        raise AssertionError("expected KeyError")
+    except KeyError:
+        pass
+
+
+def test_settlement_csv_unverified_vendor_raises():
+    p = _write(Path(tmp_dir()) / "payu.csv", "a,b,c\n1,2,3\n")
+    try:
+        load_settlement_csv(str(p), "payu_settlement_csv")
+        raise AssertionError("expected ValueError (map not filled)")
+    except ValueError:
+        pass
 
 
 if __name__ == "__main__":

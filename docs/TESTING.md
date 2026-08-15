@@ -12,7 +12,7 @@ python tests/test_matching.py
 Exit 0 = all green. It is a plain assert-based script (no framework, by design — see
 `docs/DECISIONS.md` D-8).
 
-## What is covered (18 checks)
+## What is covered (27 checks)
 
 | Check | What it proves |
 |---|---|
@@ -34,6 +34,15 @@ Exit 0 = all green. It is a plain assert-based script (no framework, by design �
 | `test_export_gst_and_tally` | GST netting + Tally MATCHED row |
 | `test_classify_fee_drift_and_direct_transfer` | exception rules fire |
 | `test_build_llm_prompt` | prompt builder emits triage text |
+| `test_hdfc_bank_statement_parse` | HDFC 2-col debit/credit + preamble skip + `dd/mm/yy` |
+| `test_sbi_bank_statement_parse` | SBI header + OPENING BALANCE skip |
+| `test_axis_bank_statement_parse` | Axis DR/CR columns + `dd-MM-yyyy` |
+| `test_kotak_bank_statement_parse` | Kotak variant A layout |
+| `test_icici_bank_statement_parse` | ICICI 8-col layout + `dd-MMM-yyyy` |
+| `test_razorpay_settlement_csv_parse` | Razorpay 7-col settlement CSV + ISO date |
+| `test_razorpay_recon_csv_parse` | Razorpay 27-col recon CSV |
+| `test_bank_statement_unknown_bank_raises` | unknown bank -> KeyError |
+| `test_settlement_csv_unverified_vendor_raises` | unwired vendor -> ValueError (no guess) |
 
 ## Manual smoke checklist (when a parser changes)
 
@@ -59,9 +68,9 @@ curl -X POST http://127.0.0.1:8091/reconcile \
 
 ## What is NOT yet covered (known gaps)
 
+- Cashfree two-section recon (needs a dedicated parser).
+- PhonePe / Juspay parser data (ambiguities documented in `docs/SCHEMAS.md`).
 - Real (non-doc) vendor files with dirty columns (extra headers, blank rows).
-- Bank statement formats (registry built; column maps DEFERRED pending real samples).
-- Cashfree / PayU / PhonePe / Juspay parser data (same — needs real sample files).
 - Performance on large files (tens of thousands of rows).
 - SaaS auth, multi-user, hosting (later-stage concerns, out of scope for the open core).
 

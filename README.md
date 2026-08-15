@@ -8,20 +8,21 @@ in my bank." Open-core, MIT, zero runtime dependencies.
 
 ## Status
 
-Phases 1, 2, 4, 5 done; Phase 3 mechanism done (vendor data needs real sample files).
+Phases 1, 2, 4, 5 done; Phase 3 done for the formats with public evidence.
 
 - **Level 1**: two-pass matching engine (exact UTR → amount+date fallback → unmatched).
 - **Level 2**: settlement-recon line-item parsing (Razorpay 24-param schema) + order-ledger matching + netting.
+- **Parsers (Phase 3)**: Razorpay settlement CSV + recon CSV, HDFC/SBI/ICICI/Axis/Kotak bank statements. All headers verified in `docs/SCHEMAS.md`.
 - **Exports**: Tally CSV, GST worksheet, TDS code-1035 (ex-194O) worksheet.
 - **Exceptions**: rule-based classifier + LLM-prompt builder.
 - **Thin SaaS**: FastAPI reconcile/expose/export loop (`saas/`).
-- Self-check: 18 checks.
+- Self-check: 27 checks.
 
 ## Quickstart
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py     # self-check (18 checks)
+python tests/test_matching.py     # self-check (27 checks)
 ```
 
 ```python
@@ -81,6 +82,7 @@ embedding, a ₹4-7k/mo thin SaaS through CAs, and support retainers.
 | `docs/HANDOVER.md` | where the last session stopped |
 | `docs/MONETIZATION.md` | monetization deep-research |
 | `docs/COMMERCIAL.md` | the paid layer on top of MIT |
+| `docs/SCHEMAS.md` | verified vendor/bank column layouts + sources |
 | `docs/BUG.md` / `docs/FEATURE.md` | bug/feature trails |
 | `docs/ROLLBACK.md` | the way out |
 | `docs/TESTING.md` | test checklist |

@@ -3,19 +3,39 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .models import ReconLine, Settlement, Txn
 
-_DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y")
+_DATE_FORMATS = (
+    "%Y-%m-%d", "%Y/%m/%d",      # ISO / machine
+    "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",  # Indian numeric (4-digit year)
+    "%d %b %Y", "%d %B %Y", "%d-%b-%Y",  # month-name (SBI "1 Jul 2026", ICICI "01-Jul-2024")
+)
+
+# Two-digit-year Indian dates ("01/07/26", "1-7-26"). Handled explicitly so that
+# strptime's greedy %Y (which would read "26" as the year 26 AD) never fires.
+_TWO_DIGIT_YEAR = re.compile(r"^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$")
+
+# Trailing time component ("2022-06-07T13:33:57", "29/06/2022 07:34:39").
+_TIME_SUFFIX = re.compile(r"^(.+?)[T ]\d{1,2}:\d{2}")
 
 
 def parse_date(value: str) -> date:
+    s = value.strip()
+    m = _TIME_SUFFIX.match(s)
+    if m:
+        s = m.group(1)
+    m = _TWO_DIGIT_YEAR.match(s)
+    if m:
+        d, mo, y = m.groups()
+        return date(2000 + int(y), int(mo), int(d))
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(value.strip(), fmt).date()
+            return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
     raise ValueError(f"unparseable date: {value!r}")
@@ -64,6 +84,79 @@ def load_csv(
                     ref=(row.get(ref_col) or "").strip() or None if ref_col else None,
                 )
             )
+    return txns
+
+
+def _money_or_zero(value: str | None) -> Decimal:
+    """Parse an optional money cell; empty/blank -> Decimal(0)."""
+    s = (value or "").strip()
+    if not s:
+        return Decimal("0")
+    return parse_amount(s)
+
+
+def load_bank_statement_csv(
+    path: str | Path,
+    *,
+    date_col: str,
+    debit_col: str,
+    credit_col: str,
+    ref_col: str | None = None,
+    narration_col: str | None = None,
+) -> list[Txn]:
+    """Read an Indian bank-statement CSV into Txn rows.
+
+    Indian statements (HDFC/SBI/ICICI/Axis/Kotak) use TWO columns — a debit
+    ("Withdrawal") and a credit ("Deposit") — not one signed amount. Exactly one
+    is populated per row. This loader folds them into the single Txn.amount:
+    credits are positive, debits are negative. The bank's own reference number
+    (Chq./Ref.No. / Ref No. / CHQNO) becomes Txn.utr; the narration becomes
+    Txn.ref so a human can read what each line was.
+
+    Real bank CSVs carry preamble rows above the header (HDFC ~2-3, Axis ~20),
+    so the header row is detected by scanning for the row containing date_col +
+    debit_col + credit_col rather than assuming row 0.
+    """
+    required = {date_col, debit_col, credit_col}
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        rows = list(csv.reader(fh))
+
+    header_i = None
+    for i, row in enumerate(rows):
+        if required.issubset({c.strip() for c in row}):
+            header_i = i
+            break
+    if header_i is None:
+        raise ValueError(
+            f"no header row found containing {sorted(required)} — is this a "
+            f"statement CSV for this bank?"
+        )
+
+    header = [c.strip() for c in rows[header_i]]
+    idx = {name: header.index(name) for name in (date_col, debit_col, credit_col)}
+
+    def _cell(row, name):
+        if name is None:
+            return None
+        if name not in header:
+            return None
+        return (row[header.index(name)] or "").strip() or None
+
+    txns: list[Txn] = []
+    for row in rows[header_i + 1:]:
+        debit = _money_or_zero(row[idx[debit_col]] if idx[debit_col] < len(row) else None)
+        credit = _money_or_zero(row[idx[credit_col]] if idx[credit_col] < len(row) else None)
+        if debit == 0 and credit == 0:
+            continue  # skip balance-only / blank / OPENING BALANCE rows
+        amount = credit if credit != 0 else -debit
+        txns.append(
+            Txn(
+                utr=_cell(row, ref_col),
+                amount=amount,
+                txn_date=parse_date(row[idx[date_col]]),
+                ref=_cell(row, narration_col),
+            )
+        )
     return txns
 
 
@@ -205,15 +298,15 @@ def load_recon_csv(
         reader = csv.DictReader(fh)
         out: list[ReconLine] = []
         for row in reader:
-            fee = parse_amount(row[fee_col]) if fee_col and row.get(fee_col) else Decimal("0")
-            tax = parse_amount(row[tax_col]) if tax_col and row.get(tax_col) else Decimal("0")
+            fee = _money_or_zero(row.get(fee_col)) if fee_col else Decimal("0")
+            tax = _money_or_zero(row.get(tax_col)) if tax_col else Decimal("0")
             out.append(
                 ReconLine(
                     entity_id=(row.get(entity_id_col) or "").strip(),
                     type=(row.get(type_col) or "").strip().lower(),
-                    debit=parse_amount(row[debit_col]),
-                    credit=parse_amount(row[credit_col]),
-                    amount=parse_amount(row[amount_col]),
+                    debit=_money_or_zero(row.get(debit_col)),
+                    credit=_money_or_zero(row.get(credit_col)),
+                    amount=_money_or_zero(row.get(amount_col)),
                     currency=(row.get(currency_col) or "INR").strip() if currency_col else "INR",
                     fee=fee,
                     tax=tax,

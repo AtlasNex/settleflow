@@ -33,9 +33,11 @@ from .exports import (
 )
 from .exceptions import Exception, build_llm_prompt, classify
 from .schemas import (
+    API_PARSERS,
     BANK_STATEMENT_MAPS,
     RECON_CSV_MAPS,
     SETTLEMENT_CSV_MAPS,
+    BankColumnMap,
     ColumnMap,
     ReconColumnMap,
     load_bank_statement,
@@ -43,7 +45,7 @@ from .schemas import (
     load_vendor_recon_csv,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "BatchRecon",
@@ -78,9 +80,11 @@ __all__ = [
     "Exception",
     "build_llm_prompt",
     "classify",
+    "API_PARSERS",
     "BANK_STATEMENT_MAPS",
     "RECON_CSV_MAPS",
     "SETTLEMENT_CSV_MAPS",
+    "BankColumnMap",
     "ColumnMap",
     "ReconColumnMap",
     "load_bank_statement",

@@ -43,3 +43,19 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   .github/FUNDING.yml, MASTER-PLAN competitive/monetization refresh.
 - **Deferred (honest):** Phase 3 vendor/bank column maps (needs real sample files);
   SaaS hosting/auth (later-stage).
+
+## 2026-08-16 — Session 4 (Phase 3 schemas sourced + wired)
+
+- **Model:** deepseek-v4-pro (build), deepseek-v4-flash (2 research subagents).
+- **Did:** Sanjay said "get the files yourself." Sourced VERIFIED column layouts from
+  public evidence (official Razorpay sample xlsx files on razorpay.com/docs, Cashfree/
+  PhonePe/Juspay docs, and open-source parsers reading real bank exports). Wired
+  Razorpay settlement CSV (7 cols) + recon CSV (27 cols) + HDFC/SBI/ICICI/Axis/Kotak
+  statements into `schemas.py`. Added `BankColumnMap` + `load_bank_statement_csv`
+  (two-column debit/credit, preamble auto-detect) and extended `parse_date` (dd/mm/yy,
+  dd MMM yyyy, dd-MMM-yyyy, ISO datetime-with-time). All headers + sources in
+  `docs/SCHEMAS.md`.
+- **Verified:** self-check 27/27; `hermes verify` ok:true; package imports clean.
+- **Deferred (honest):** Cashfree recon (two-section file), PhonePe (undocumented
+  type/date), Juspay (unstated money unit), PayU (user-configurable columns) — all
+  documented in `docs/SCHEMAS.md`, not fabricated.

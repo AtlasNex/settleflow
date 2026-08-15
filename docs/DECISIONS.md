@@ -137,3 +137,21 @@ survived because the OSS component layer is genuinely un-owned.
   evidence in `docs/MONETIZATION.md`. Grants are a deferred harvest (year-1 ₹0-5 lakh).
 - **Model:** deepseek-v4-pro (synthesis) + deepseek-v4-flash (3 research subagents).
   **Date:** 2026-08-16.
+
+### D-19: Phase 3 column maps sourced from public evidence, not private accounts
+- **Why:** Sanjay asked to "get the files yourself." His own settlement/statement files
+  do not exist (the library is for *other* merchants' files), but the formats are
+  verifiable from public sources: official sample files (Razorpay's xlsx samples still
+  hosted on razorpay.com/docs), official docs (Cashfree/PhonePe/Juspay field tables),
+  and open-source parsers that read the exact real exports (bank fixtures). Two research
+  subagents cross-corroborated every header from ≥2 independent sources. Wired: Razorpay
+  settlement CSV (7 cols) + recon CSV (27 cols), HDFC/SBI/ICICI/Axis/Kotak statements.
+  NOT wired (honest): Cashfree recon (two-section file), PhonePe (undocumented type/date
+  values), Juspay (unstated money unit), PayU (user-configurable columns). Full headers
+  + sources in `docs/SCHEMAS.md`.
+- **Structural change:** bank statements use TWO columns (debit/credit), so a
+  `BankColumnMap` and `load_bank_statement_csv` were added (credits positive, debits
+  negative, preamble rows auto-detected). `parse_date` extended for `dd/mm/yy`,
+  `dd MMM yyyy`, `dd-MMM-yyyy`, and ISO/datetime-with-time.
+- **Model:** deepseek-v4-pro (build) + deepseek-v4-flash (2 research subagents).
+  **Date:** 2026-08-16.

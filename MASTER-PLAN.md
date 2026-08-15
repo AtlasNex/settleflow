@@ -86,7 +86,7 @@ Level 1 is built and tested. Level 2 is the immediate next increment; the Razorp
 |---|---|---|---|
 | 1 | scaffold + data model + matching + Razorpay parser + self-check | - | done |
 | 2 | line-item decomposition (Razorpay Fetch Recon schema) | 1 | done |
-| 3 | more parsers: Cashfree, PayU, PhonePe, Juspay + bank statements | real sample files | registry built; parser data DEFERRED (D-7: needs real samples) |
+| 3 | more parsers: Cashfree, PayU, PhonePe, Juspay + bank statements | real sample files | done for Razorpay + 5 banks (see `docs/SCHEMAS.md`); Cashfree/PhonePe/Juspay/PayU DEFERRED (ambiguities + dedicated parsers) |
 | 4 | thin hosted SaaS: ingest, exception queue, Tally/GST/TDS-1035 exports | 3 | done (local; hosting deferred) |
 | 5 | exception classifier + optional LLM triage hook | 4 | done (rules + prompt builder; LLM call is a SaaS-layer concern) |
 

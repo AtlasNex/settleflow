@@ -18,21 +18,25 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 ## Current state (2026-08-16)
 
-Phases 1, 2, 4, 5 done; Phase 3 mechanism done, data DEFERRED:
+Phases 1, 2, 4, 5 done; Phase 3 done for the formats with public evidence:
 
 - **Level 1**: `Txn`/`Match`/`ReconResult` + two-pass match + `match_settlements`.
 - **Level 2**: `ReconLine`/`BatchRecon`/`OrderMatch` + `group_batches` + `match_orders`
   + `parse_razorpay_recon` (verified 24-param schema, fails closed on unknown fields).
-- **Phase 3**: `schemas.py` registry (loaders + verified/empty column-map slots). The
-  Cashfree/PayU/PhonePe/Juspay + bank-statement column maps are NOT filled — they need
-  real sample files (D-7). Do NOT fill them from memory or from JS-rendered docs.
+- **Phase 3**: `schemas.py` registry now WIRED with verified maps — Razorpay settlement
+  CSV (7 cols) + recon CSV (27 cols), HDFC/SBI/ICICI/Axis/Kotak bank statements (two
+  column debit/credit, preamble auto-detected). All headers + sources in
+  `docs/SCHEMAS.md`. NOT wired (needs a dedicated parser or a real file): Cashfree recon
+  (two-section file), PhonePe (undocumented type/date), Juspay (unstated money unit),
+  PayU (user-configurable columns).
 - **Phase 4**: `saas/app.py` — FastAPI reconcile/expose/export loop, sqlite3 storage,
   Tally + GST + TDS-1035 CSV exports. Runs locally, not hosted.
 - **Phase 5**: `exceptions.py` — `classify()` (5 rule categories) + `build_llm_prompt()`.
   The actual LLM call is a SaaS-layer concern, not in the core.
 
 Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
-`f2a9b92` relocate+rename, `ca3f592` docs; the 2026-08-16 work is the next commit(s).
+`f2a9b92` relocate+rename, `ca3f592` docs; 2026-08-16 work: `9becf0e` Phases 2-5 +
+`04eceba` verify manifest; Phase-3 maps are the next commit.
 
 ## How to run
 
@@ -44,17 +48,23 @@ python tests/test_matching.py            # self-check, 18 checks
 python -m uvicorn saas.app:app --host 127.0.0.1 --port 8091
 ```
 
-## What is next (Phase 3 data — needs real samples)
+## What is next
 
-The single most valuable next step: get **one real sample** of each of the following,
-then fill the registry maps and add a test per format:
+Phase 3 is substantially done. Remaining parser work, in priority order (each still
+needs either a dedicated parser or a real sample file to resolve an ambiguity — see
+`docs/SCHEMAS.md`):
 
-1. A real Razorpay settlement CSV (dashboard export header).
-2. One real bank statement CSV each: HDFC / SBI / ICICI / Axis / Kotak.
-3. Cashfree / PayU / PhonePe / Juspay settlement recon CSV headers.
+1. **Cashfree settlement-recon** — two-section file (14 + 48 cols); write a dedicated
+   two-section parser.
+2. **PhonePe settlement report** — 14 verified fields, but `PaymentType` values and the
+   date format are undocumented; confirm against a real file first.
+3. **Juspay settlement file** — 25 verified columns, but the money unit (paise vs rupees)
+   is unstated; confirm against a real file first.
+4. **Kotak variant B** — the second documented layout; add auto-detect.
 
-Without a real sample, do NOT invent the column names (this is the exact Nova zoning
-failure mode). The mechanism is built; only the data is missing.
+The single most valuable thing Sanjay can drop in: one real HDFC/SBI statement CSV and
+one real Razorpay recon CSV export, to confirm the units/date variants the public
+sources couldn't fully pin down.
 
 ## Gotchas / pitfalls
 

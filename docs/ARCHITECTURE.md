@@ -16,7 +16,7 @@ settleflow/
 │   │                       #   parse_razorpay_recon(), load_recon_csv(), parse_date/amount
 │   ├── exports.py          # export_tally_csv(), export_gst_worksheet(), export_tds_1035()
 │   ├── exceptions.py       # classify(), build_llm_prompt(), Exception
-│   └── schemas.py          # ColumnMap, ReconColumnMap, *_MAPS, load_* helpers
+│   └── schemas.py          # ColumnMap, BankColumnMap, ReconColumnMap, *_MAPS, load_* helpers
 ├── saas/
 │   ├── app.py              # FastAPI: /reconcile, /runs, /export/*, /health
 │   ├── templates/          # index.html, runs.html (Jinja2)
@@ -72,11 +72,12 @@ payment via `payment_id`, sets `adjustment` lines aside for review, and falls ba
 
 ## Schema registry (schemas.py)
 
-Vendor/bank formats are **column-map data**, not code. The registry ships loaders +
-three dicts (`SETTLEMENT_CSV_MAPS`, `BANK_STATEMENT_MAPS`, `RECON_CSV_MAPS`). Verified
-formats are backed by a real parser (Razorpay API JSON). Every CSV/bank slot that lacks
-a real sample file is `None` and raises a clear "needs a real sample" error when called
-— the D-7 posture, never a guessed schema.
+Vendor/bank formats are **column-map data**, not code. The registry ships three maps:
+`SETTLEMENT_CSV_MAPS` (batch files -> `ColumnMap`), `BANK_STATEMENT_MAPS` (two-column
+debit/credit -> `BankColumnMap`), and `RECON_CSV_MAPS` (line items -> `ReconColumnMap`).
+Every wired map traces to a verified header in `docs/SCHEMAS.md`. Any slot still `None`
+raises a clear "needs a real sample" error when called — the D-7 posture, never a
+guessed schema.
 
 ## Exception layer (exceptions.py)
 
