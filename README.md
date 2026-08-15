@@ -7,11 +7,12 @@ settlement/bank CSVs, match by RRN/UTR, and flag the exceptions.
 
 ## Status — first increment (in progress)
 
-- [x] Data model (`Txn`, `Match`, `ReconResult`)
+- [x] Data model (`Txn`, `Match`, `ReconResult`, `Settlement`)
 - [x] Deterministic RRN/UTR matching engine (exact UTR → amount+date fallback → unmatched)
+- [x] Settlement-level matcher (`match_settlements`)
 - [x] Generic CSV loader with explicit column mapping
-- [ ] Vendor settlement parsers (Razorpay, Cashfree, PayU, PhonePe, Juspay) — column maps filled from real sample files
-- [ ] Bank statement parsers (HDFC, SBI, ICICI, Axis, Kotak)
+- [x] Razorpay settlement parser (real API schema: paise→rupee, epoch→date)
+- [ ] More vendor parsers (Cashfree, PayU, PhonePe, Juspay) + bank statements
 - [ ] Hosted SaaS (later)
 
 ## Why

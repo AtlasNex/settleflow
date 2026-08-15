@@ -58,6 +58,18 @@ class ReconResult:
         return sum((t.amount for t in self.bank_only), Decimal("0"))
 
 
+@dataclass(frozen=True)
+class Settlement:
+    """A gateway settlement batch (e.g. one Razorpay payout)."""
+
+    settlement_id: str
+    amount: Decimal          # net amount settled, in rupees
+    created_at: date
+    utr: str | None = None
+    fees: Decimal = Decimal("0")
+    tax: Decimal = Decimal("0")
+
+
 def normalize_utr(value: str | None) -> str:
     """Return the alphanumeric, uppercased form of a UTR/RRN.
 

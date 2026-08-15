@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import Decimal
 
-from .models import Match, MatchStatus, ReconResult, Txn
+from .models import Match, MatchStatus, ReconResult, Settlement, Txn
 
 
 def match(settlements: list[Txn], bank: list[Txn]) -> ReconResult:
@@ -71,3 +71,18 @@ def match(settlements: list[Txn], bank: list[Txn]) -> ReconResult:
 
     result.bank_only = [b for i, b in enumerate(bank) if i not in consumed]
     return result
+
+
+def match_settlements(settlements: list[Settlement], bank: list[Txn]) -> ReconResult:
+    """Reconcile settlement batches against bank credits.
+
+    Each Settlement becomes a Txn (ref = settlement_id) and is matched with
+    match(). The bank credit carries the correspondent bank's UTR, which often
+    differs from the gateway's settlement_utr, so the (amount, date) fallback in
+    match() is what actually pairs them in practice.
+    """
+    txns = [
+        Txn(utr=s.utr, amount=s.amount, txn_date=s.created_at, ref=s.settlement_id)
+        for s in settlements
+    ]
+    return match(txns, bank)
