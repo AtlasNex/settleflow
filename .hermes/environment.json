@@ -1,0 +1,20 @@
+{
+  "source": "manifest",
+  "recipe": {
+    "name": "SettleFlow (assert self-check + thin SaaS)",
+    "kind": "fastapi",
+    "bootstrap": [
+      "pip install -e ."
+    ],
+    "build": [],
+    "test": [
+      "python tests/test_matching.py"
+    ],
+    "start": "python -m uvicorn saas.app:app --host 127.0.0.1 --port 8000",
+    "port": 8000,
+    "readinessPath": "/health",
+    "evidence": [
+      "Manifest saved by Hermes (2026-08-16): project uses an assert-based self-check, no pytest (CONSTRAINTS.md #8)."
+    ]
+  }
+}
