@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "settleflow"
-version = "0.4.0"
+version = "0.5.0"
 description = "Open-source UPI/NPCI settlement reconciliation library for India"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,9 @@ dependencies = []
 # The thin SaaS layer (saas/) only. The library itself stays stdlib-only
 # (CONSTRAINTS.md #6) — these deps are NOT required to use the OSS core.
 saas = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9"]
+# Optional PDF bank-statement extraction (settleflow.pdf). The core stays
+# stdlib-only; pymupdf is imported lazily only when a PDF is parsed.
+pdf = ["pymupdf>=1.24"]
 
 [tool.setuptools.packages.find]
 include = ["settleflow*"]

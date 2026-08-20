@@ -32,6 +32,14 @@ from .exports import (
     export_tds_1035,
 )
 from .exceptions import Exception, build_llm_prompt, classify
+from .pdf import (
+    PdfEncryptedError,
+    PdfLayoutError,
+    PdfScannedError,
+    extract_pdf_text,
+    parse_sbi_pdf,
+    parse_sbi_statement,
+)
 from .schemas import (
     API_PARSERS,
     BANK_STATEMENT_MAPS,
@@ -45,7 +53,7 @@ from .schemas import (
     load_vendor_recon_csv,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "BatchRecon",
@@ -80,6 +88,12 @@ __all__ = [
     "Exception",
     "build_llm_prompt",
     "classify",
+    "PdfEncryptedError",
+    "PdfLayoutError",
+    "PdfScannedError",
+    "extract_pdf_text",
+    "parse_sbi_pdf",
+    "parse_sbi_statement",
     "API_PARSERS",
     "BANK_STATEMENT_MAPS",
     "RECON_CSV_MAPS",

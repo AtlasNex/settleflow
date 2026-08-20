@@ -10,11 +10,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from settleflow import (
     MatchStatus,
     Txn,
+    PdfEncryptedError,
+    PdfLayoutError,
+    PdfScannedError,
     build_llm_prompt,
     classify,
     export_gst_worksheet,
     export_tally_csv,
     export_tds_1035,
+    extract_pdf_text,
     group_batches,
     load_bank_statement,
     load_settlement_csv,
@@ -24,6 +28,7 @@ from settleflow import (
     match_settlements,
     parse_razorpay_recon,
     parse_razorpay_settlements,
+    parse_sbi_statement,
 )
 
 _TMP = Path(tempfile.mkdtemp(prefix="settleflow-test-"))
@@ -500,6 +505,98 @@ def test_settlement_csv_unverified_vendor_raises():
         load_settlement_csv(str(p), "payu_settlement_csv")
         raise AssertionError("expected ValueError (map not filled)")
     except ValueError:
+        pass
+
+
+# ---- Phase 3.5: SBI bank-statement PDF parser (text layer, YONO layout) ----
+
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "sbi"
+
+
+def _fixture(name):
+    return (_FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_sbi_yono_multi_parse():
+    txns = parse_sbi_statement(_fixture("yono_savings_multi_jan_2026.txt"))
+    assert len(txns) == 2
+    # APY debit -> negative
+    assert txns[0].txn_date == date(2025, 12, 4)
+    assert txns[0].amount == Decimal("-90.00")
+    assert txns[0].utr is None
+    assert "APY_DEC25" in txns[0].ref
+    # interest credit -> positive
+    assert txns[1].txn_date == date(2025, 12, 25)
+    assert txns[1].amount == Decimal("3.00")
+    assert txns[1].ref == "INTEREST CREDIT"
+
+
+def test_sbi_yono_combined_parse():
+    # two tables (loan account + savings account) in one statement -> 5 rows
+    txns = parse_sbi_statement(_fixture("yono_savings_combined_sep_2025.txt"))
+    assert len(txns) == 5
+    amounts = [t.amount for t in txns]
+    assert amounts == [
+        Decimal("6829.00"),   # interest repayment (credit)
+        Decimal("77171.00"),  # principal repayment (credit)
+        Decimal("41000.00"),  # principal repayment (credit)
+        Decimal("-5976.00"),  # interest (debit)
+        Decimal("-90.00"),    # APY debit
+    ]
+    assert txns[0].txn_date == date(2025, 8, 1)
+    assert txns[3].ref == "INTEREST"
+
+
+def test_sbi_netbanking_layout_rejected():
+    # legacy layout must raise, never half-parse (D-7)
+    try:
+        parse_sbi_statement(_fixture("netbanking_2021_22.txt"))
+        raise AssertionError("expected PdfLayoutError for legacy netbanking layout")
+    except PdfLayoutError as e:
+        assert "netbanking" in str(e)
+
+
+def test_sbi_pdf_text_extraction_and_detection():
+    # The PDF layer (extract_pdf_text) needs pymupdf; skip quietly if absent
+    # so the stdlib-only self-check still passes without the optional dep.
+    try:
+        import pymupdf
+    except ImportError:
+        return
+
+    # 1) a text PDF round-trips through extract_pdf_text
+    text_pdf = Path(tmp_dir()) / "sbi_text.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Date Transaction Reference Balance")
+    doc.save(str(text_pdf))
+    doc.close()
+    assert "Transaction Reference" in extract_pdf_text(str(text_pdf))
+
+    # 2) a password-locked PDF is detected, not silently opened
+    enc_pdf = Path(tmp_dir()) / "sbi_locked.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "secret statement")
+    doc.save(str(enc_pdf), encryption=pymupdf.PDF_ENCRYPT_AES_256,
+             owner_pw="pw", user_pw="pw")
+    doc.close()
+    try:
+        extract_pdf_text(str(enc_pdf))
+        raise AssertionError("expected PdfEncryptedError")
+    except PdfEncryptedError:
+        pass
+
+    # 3) an image-only (no text layer) PDF is detected as scanned
+    scan_pdf = Path(tmp_dir()) / "sbi_scanned.pdf"
+    doc = pymupdf.open()
+    doc.new_page()  # blank page -> no text layer
+    doc.save(str(scan_pdf))
+    doc.close()
+    try:
+        extract_pdf_text(str(scan_pdf))
+        raise AssertionError("expected PdfScannedError")
+    except PdfScannedError:
         pass
 
 

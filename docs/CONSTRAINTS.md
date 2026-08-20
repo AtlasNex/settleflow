@@ -19,7 +19,10 @@ paired with its reason (full reasoning in `docs/DECISIONS.md`).
 5. **UTR normalization is alphanumeric + uppercase, nothing else.** Do not strip other
    characters, trim differently, or lowercase. Changing this changes every match key.
 6. **Zero runtime dependencies.** stdlib only. Any new dependency requires a
-   `DECISIONS.md` entry and a good reason (there is none yet).
+   `DECISIONS.md` entry and a good reason (there is none yet). Optional extras
+   are allowed as long as the core stays importable with zero deps (see D-17
+   SaaS extras; D-21 added an optional `[pdf]` extra pulling pymupdf, imported
+   lazily only when a PDF is parsed).
 7. **License stays MIT.** Do not re-license without Sanjay.
 8. **No test framework.** The assert-based self-check (`python tests/test_matching.py`)
    is the standard. Do not introduce pytest/tox unless Sanjay asks.
@@ -49,5 +52,8 @@ paired with its reason (full reasoning in `docs/DECISIONS.md`).
   same (amount, date). This is a deliberate first-pass simplification; the upgrade path
   is UTR-based disambiguation or order-level matching (Phase 2, now built via
   `match_orders`).
-- PDF bank statements (Sanjay's SBI file) are not parsed yet — PDF extraction is a
-  separate layer (ATL-72), not part of the CSV trust boundary.
+- PDF bank statements: the modern SBI YONO **text-layer** layout is parsed
+  (`settleflow/pdf.py`, D-21). Still deferred: (a) the legacy netbanking PDF
+  layout (day/month/year split across wrapped lines -> `PdfLayoutError`; use the
+  CSV export), and (b) scanned/image-only PDFs (`PdfScannedError`; OCR is a
+  separate unbuilt layer).

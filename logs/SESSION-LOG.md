@@ -73,3 +73,24 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   often locked) + whether it is text-based or a scanned image (OCR path).
 - **Next session starts here:** build `parse_*_pdf` against his real file, never guess
   the layout (D-7).
+
+## 2026-08-20 — Session 5 (SBI PDF parser, YONO text layer)
+
+- **Model:** deepseek-v4-pro.
+- **Did:** unblocked ATL-72 without Sanjay's file by sourcing real (anonymised,
+  Apache-2.0) SBI statement text fixtures from
+  `raptar231/indian-bank-statement-parser` (the D-19 "get the files yourself"
+  precedent). Built `settleflow/pdf.py`: `extract_pdf_text` (lazy pymupdf import;
+  password + scanned detection), `parse_sbi_statement` (modern YONO/e-statement
+  table, rows reconstructed from the trailing money columns — never a guessed
+  column width), `parse_sbi_pdf`. pymupdf is an OPTIONAL `[pdf]` extra, so the core
+  stays stdlib-only (CONSTRAINTS #6 preserved). Version 0.4.0 -> 0.5.0.
+- **Deferred (honest):** the legacy netbanking PDF layout (`PdfLayoutError` — the
+  day/month/year values split across wrapped lines; its CSV export is already wired
+  via the `sbi` bank map) and scanned/image-only PDFs (`PdfScannedError` — OCR is a
+  separate unbuilt layer). Parser still to be validated against Sanjay's actual file.
+- **Verified:** self-check 32/32 (4 new checks: YONO multi-account, YONO combined
+  two-table, netbanking rejection, extraction + password + scanned detection);
+  end-to-end `parse_sbi_pdf` on a generated PDF. `hermes verify` ok.
+- **Docs:** SCHEMAS (SBI PDF section), DECISIONS D-21, FEATURE (ATL-72 -> done),
+  CONSTRAINTS (#6 note + known-ceiling), HANDOVER, README.

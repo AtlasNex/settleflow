@@ -163,3 +163,24 @@ survived because the OSS component layer is genuinely un-owned.
   `pymupdf` are already installed, so no new dependency. Tracked as ATL-72; blocked on
   Sanjay providing the actual PDF.
 - **Model:** deepseek-v4-pro. **Date:** 2026-08-16.
+
+### D-21: SBI PDF parser v1 = YONO text layer only; netbanking + OCR deferred
+- **Why:** ATL-72 was blocked on Sanjay's real SBI PDF. Following D-19 ("get the
+  files yourself"), the real SBI statement text layouts were sourced from the
+  Apache-2.0 `raptar231/indian-bank-statement-parser` fixtures (already
+  anonymised), so the parser is built against real layouts, never a guess (D-7).
+  SBI has two statement layouts: the modern YONO/e-statement table
+  (`Date | Transaction Reference | Ref.No./Chq.No. | Credit | Debit | Balance`)
+  and the legacy netbanking table (`Txn Date | Value Date | Description |
+  Ref No./Cheque No. | Debit | Credit | Balance`). v1 parses YONO only; the
+  netbanking PDF's day/month/year values split across wrapped lines in the text
+  layer (and its CSV export is already wired via the `sbi` bank map), so the
+  parser raises `PdfLayoutError` rather than half-parsing it. Scanned PDFs (no
+  text layer) raise `PdfScannedError` — OCR is a separate, unbuilt layer.
+- **Structural change:** new `settleflow/pdf.py` (D-20's separate layer) with
+  `extract_pdf_text` (lazy pymupdf import; password + scanned detection),
+  `parse_sbi_statement`, `parse_sbi_pdf`. pymupdf is an OPTIONAL dependency
+  (`[project.optional-dependencies].pdf`), so CONSTRAINTS #6 (stdlib-only core)
+  still holds. Fixtures vendored under `tests/fixtures/sbi/` with a NOTICE.md
+  (Apache-2.0 attribution). Version bumped 0.4.0 -> 0.5.0.
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-20.

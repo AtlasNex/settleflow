@@ -4,15 +4,9 @@ A start-to-finish trail anyone can pick up cold.
 
 ## In progress
 
-### SBI bank-statement PDF parser (ATL-72)
+_(none — every tracked item is either done below or deferred with a reason in the backlog.)_
 
-- **What:** parse an SBI statement **PDF** (not CSV) into `Txn` rows. `pypdf` +
-  `pymupdf` already installed. Resolve on the real file: password (SBI PDFs often
-  locked), text-vs-scanned (OCR path), table layout.
-- **Why:** Sanjay's own SBI statement is a PDF; the library has no PDF path yet.
-- **Status:** blocked — needs Sanjay's actual PDF (path + password).
-
-## Done (this session, 2026-08-16)
+## Done (this session, 2026-08-20)
 
 | # | Feature | Status | Commit |
 |---|---|---|---|
@@ -24,18 +18,21 @@ A start-to-finish trail anyone can pick up cold.
 | 6 | Tally / GST / TDS-1035 exports | done | `9becf0e` |
 | 7 | Monetization research + commercial license + funding.json | done | `9becf0e` |
 | 8 | SBI tab-separated `.xls` delimiter fix | done | `e2f16e4` |
+| 9 | SBI bank-statement **PDF** parser (YONO text layout) | done | D-21 |
 
 ## Backlog (ordered)
 
 | # | Feature | Notes |
 |---|---|---|
-| 9 | SBI statement **PDF** parser | blocked on real file (ATL-72) |
-| 10 | Cashfree settlement-recon (two-section file) | dedicated parser; schema in `docs/SCHEMAS.md` |
-| 11 | PhonePe settlement report | confirm `PaymentType`/date format first |
-| 12 | Juspay settlement file | confirm money unit first |
-| 13 | Kotak statement variant B (auto-detect) | schema in `docs/SCHEMAS.md` |
-| 14 | LLM triage call wired into the SaaS layer | core has `build_llm_prompt`; call is SaaS-side |
-| 15 | Hosted SaaS deployment (auth, multi-user) | later stage |
+| 9 | SBI statement **PDF** parser | done for YONO text layout (D-21); netbanking + OCR deferred below |
+| 10 | SBI legacy netbanking PDF layout | deferred — `PdfLayoutError`; day/month/year split across wrapped lines; use the CSV export |
+| 11 | Scanned SBI PDFs (OCR) | deferred — `PdfScannedError`; OCR is a separate unbuilt layer |
+| 12 | Cashfree settlement-recon (two-section file) | dedicated parser; schema in `docs/SCHEMAS.md` |
+| 13 | PhonePe settlement report | confirm `PaymentType`/date format first |
+| 14 | Juspay settlement file | confirm money unit first |
+| 15 | Kotak statement variant B (auto-detect) | schema in `docs/SCHEMAS.md` |
+| 16 | LLM triage call wired into the SaaS layer | core has `build_llm_prompt`; call is SaaS-side |
+| 17 | Hosted SaaS deployment (auth, multi-user) | later stage |
 
 ## Feature template
 

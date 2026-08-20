@@ -79,3 +79,22 @@ Notes: SBI native download is tab-separated ".xls" with BOM/CRLF and an
 `OPENING BALANCE` row (skipped by the loader). ICICI has no native CSV export
 (Excel/ZIP only); the "CSV" users get is the Excel saved-as-CSV. Kotak variant
 B is documented above but not yet wired — auto-detect when a real sample lands.
+
+## Bank statements (PDF, SBI — wired for YONO text layer)
+
+Sanjay's SBI statement is a PDF, not a CSV. `settleflow/pdf.py` parses the
+**modern YONO / e-statement** transaction table from the PDF text layer:
+
+- Header (6 cols): `Date, Transaction Reference, Ref.No./Chq.No., Credit, Debit, Balance`
+  (note: **Credit before Debit** — opposite of the CSV header above).
+- Money: INR rupees, plain decimal (no ₹), one of Credit/Debit populated per row
+  (the other is `-`); balance is the running total and is always present.
+- Date: `dd-mm-yy` (also accepts `dd-mm-yyyy`). Statement may span multiple
+  pages and contain more than one account table (e.g. a loan account and a
+  savings account) — the parser collects transactions from every table.
+- Long narrations wrap onto their own extracted line; rows are reconstructed
+  from the trailing money columns, never a guessed column width.
+- Password-locked PDFs -> `PdfEncryptedError`; image-only (scanned) PDFs ->
+  `PdfScannedError`; the legacy netbanking layout -> `PdfLayoutError` (deferred).
+- Source: anonymised text fixtures from the Apache-2.0
+  `raptar231/indian-bank-statement-parser` (`tests/fixtures/sbi/`, see NOTICE.md).
