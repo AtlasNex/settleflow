@@ -83,16 +83,140 @@ def _tail(toks: list[str]):
     return refno, credit, debit, balance
 
 
-def parse_sbi_statement(text: str) -> list[Txn]:
-    """Parse the text layer of a modern SBI (YONO) statement into Txn rows.
+def parse_sbi_credit_card(text: str) -> list[Txn]:
+    """Parse an SBI credit-card statement's text into Txn rows.
 
-    Credit -> positive amount, debit -> negative. The bank's Ref.No./Chq.No.
-    becomes Txn.utr (None when "-"), the narration becomes Txn.ref. Rows are
-    reconstructed from the money-column tail, so a narration that wraps onto
-    its own line is still attached to the right transaction. Raises
-    PdfLayoutError if the text looks like the legacy netbanking layout (not
-    yet supported) rather than silently mis-parsing it.
+    Layout: ``Date | Description | Amount (Rs.)``. Purchases/fees are plain
+    (debit -> negative); payments and refunds carry a trailing ``Cr`` marker
+    (credit -> positive).
     """
+    row = re.compile(
+        r"^(\d{2}/\d{2}/\d{4})\s+(.+?)\s+(-?[\d,]+\.\d{2})\s*(?:CR\.?)?\s*$",
+        re.IGNORECASE,
+    )
+    txns: list[Txn] = []
+    for ln in text.replace("\r", "\n").split("\n"):
+        ln = ln.strip()
+        m = row.match(ln)
+        if not m:
+            continue
+        amount = Decimal(m.group(3).replace(",", ""))
+        is_credit = amount < 0 or re.search(r"\bCR\.?$", ln, re.IGNORECASE) is not None
+        magnitude = -amount if amount < 0 else amount
+        txns.append(Txn(
+            utr=None,
+            amount=magnitude if is_credit else -magnitude,
+            txn_date=parse_date(m.group(1)),
+            ref=m.group(2).strip() or None,
+        ))
+    return txns
+
+
+# Legacy SBI netbanking layout:
+#   Txn Date | Value Date | Description | Ref No./Cheque No. | Debit | Credit | Balance
+# Dates are "dd MMM" and the transaction year is printed on a following
+# "yyyy yyyy" line (a PDF text-extraction artifact). One of debit/credit is
+# populated per row (the other collapses), so the sign is recovered from
+# description heuristics ("BY UPI" = credit, "TO UPI" = debit, etc.).
+_NET_ROW = re.compile(r"^(\d{1,2}\s+[A-Za-z]{3})(?:\s+\d{1,2}\s+[A-Za-z]{3})?\s*(.*)$")
+_NET_YEAR_LINE = re.compile(r"^(\d{4})\s+(\d{4})\s*(.*)$")
+_NET_AMOUNT = re.compile(r"[\d,]+\.\d{2}")
+_NET_UTR = re.compile(r"\b(?:NEFT\*?[A-Z0-9*]+|[A-Za-z0-9]{12,})\b")
+
+
+def _is_credit(desc: str) -> bool:
+    d = desc.upper()
+    if d.startswith("TO") or d.startswith("DEBIT"):
+        return False
+    if re.search(r"TRANSFER[- ]?INB", d):
+        return True
+    if any(kw in d for kw in ("CREDIT", "DEPOSIT", "SALARY", "INTEREST",
+                              "REFUND", "INWARD", "ACHC")):
+        return True
+    if d.endswith("CR"):
+        return True
+    if re.search(r"^BY\s+(TRANSFER|CLEARING|CASH|CHEQUE|NEFT|RTGS|IMPS|UPI)", d):
+        return True
+    return False
+
+
+def parse_sbi_netbanking(text: str) -> list[Txn]:
+    """Parse a legacy SBI netbanking statement's text into Txn rows."""
+    lines = [ln.strip() for ln in text.replace("\r", "\n").split("\n")]
+    lines = [ln for ln in lines if ln]
+
+    header_i = None
+    for i, ln in enumerate(lines):
+        if re.search(r"Txn\s+Date", ln, re.IGNORECASE) and "Balance" in ln:
+            header_i = i
+            break
+    if header_i is None:
+        raise PdfLayoutError("no SBI netbanking transaction table found")
+
+    txns: list[Txn] = []
+    i = header_i + 1
+    while i < len(lines):
+        ln = lines[i]
+        m = _NET_ROW.match(ln)
+        if not m:
+            i += 1
+            continue
+        date_str = m.group(1)
+        rest = m.group(2)
+
+        year = None
+        tail = ""
+        if i + 1 < len(lines):
+            ym = _NET_YEAR_LINE.match(lines[i + 1])
+            if ym:
+                year = int(ym.group(1))
+                tail = ym.group(3).strip()
+                i += 1  # consume the year line
+
+        amts = list(_NET_AMOUNT.finditer(rest))
+        if len(amts) < 2:
+            i += 1
+            continue
+        balance = Decimal(amts[-1].group(0).replace(",", ""))
+        amount = Decimal(amts[-2].group(0).replace(",", ""))
+
+        desc = rest[:amts[-2].start()].strip()
+        if tail:
+            desc = f"{desc} {tail}".strip()
+        desc = re.sub(r"\s+", " ", desc)
+
+        if year is None:
+            ym2 = re.search(r"from\s+\d{1,2}\s+\w{3}\s+(\d{4})", text, re.IGNORECASE)
+            year = int(ym2.group(1)) if ym2 else date.today().year
+
+        ref = None
+        um = _NET_UTR.search(desc)
+        if um:
+            ref = um.group(0)
+
+        txns.append(Txn(
+            utr=ref,
+            amount=(Decimal(1) if _is_credit(desc) else Decimal(-1)) * amount,
+            txn_date=parse_date(f"{date_str} {year}"),
+            ref=desc or None,
+        ))
+        i += 1
+    return txns
+
+
+def parse_sbi_statement(text: str) -> list[Txn]:
+    """Parse any SBI statement text (YONO, netbanking, credit card) into Txn rows.
+
+    Credit -> positive amount, debit -> negative. The narration becomes
+    Txn.ref; a reference number, when present, becomes Txn.utr. Raises
+    PdfLayoutError on an unrecognised layout.
+    """
+    upper = text.upper()
+    if "CREDIT CARD STATEMENT" in upper or "AMOUNT (RS.)" in upper:
+        return parse_sbi_credit_card(text)
+    if "TXN DATE" in upper and "VALUE" in upper and "BALANCE" in upper:
+        return parse_sbi_netbanking(text)
+
     lines = [ln.strip() for ln in text.replace("\r", "\n").split("\n")]
     lines = [ln for ln in lines if ln]
 
@@ -101,12 +225,6 @@ def parse_sbi_statement(text: str) -> list[Txn]:
         if all(k in ln for k in _YONO_HEADER):
             saw_yono_header = True
             break
-        if all(k in ln for k in _NETBANKING_HEADER) and "Balance" in ln:
-            raise PdfLayoutError(
-                "legacy netbanking statement layout is not yet supported by the "
-                "PDF parser — use SBI's CSV/Excel export (load_bank_statement, "
-                "'sbi') instead"
-            )
     if not saw_yono_header:
         raise PdfLayoutError(
             "no SBI statement transaction table found (looked for a header row "

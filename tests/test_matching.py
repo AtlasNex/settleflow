@@ -29,6 +29,7 @@ from settleflow import (
     parse_razorpay_recon,
     parse_razorpay_settlements,
     parse_sbi_statement,
+    triage_exceptions,
 )
 
 _TMP = Path(tempfile.mkdtemp(prefix="settleflow-test-"))
@@ -547,15 +548,6 @@ def test_sbi_yono_combined_parse():
     assert txns[3].ref == "INTEREST"
 
 
-def test_sbi_netbanking_layout_rejected():
-    # legacy layout must raise, never half-parse (D-7)
-    try:
-        parse_sbi_statement(_fixture("netbanking_2021_22.txt"))
-        raise AssertionError("expected PdfLayoutError for legacy netbanking layout")
-    except PdfLayoutError as e:
-        assert "netbanking" in str(e)
-
-
 def test_sbi_pdf_text_extraction_and_detection():
     # The PDF layer (extract_pdf_text) needs pymupdf; skip quietly if absent
     # so the stdlib-only self-check still passes without the optional dep.
@@ -618,6 +610,87 @@ def test_kotak_drcr_statement_auto_detect():
     cr = sum((t.amount for t in txns if t.amount > 0), Decimal("0"))
     assert dr == Decimal("10069.00")   # "Sub Total : 10,069.00 Dr"
     assert cr == Decimal("55125.00")   # "55,125.00 Cr"
+
+
+def test_sbi_netbanking_parse():
+    # legacy netbanking layout (dates split "dd MMM" / "yyyy yyyy" lines)
+    txns = parse_sbi_statement(_fixture("netbanking_2021_22.txt"))
+    assert len(txns) == 5
+    amounts = [t.amount for t in txns]
+    assert amounts == [
+        Decimal("4000.00"),   # BY UPI -> credit
+        Decimal("-2500.00"),  # TO UPI -> debit
+        Decimal("-1000.00"),  # NEFT-OTH -> debit
+        Decimal("5000.00"),   # BY TRANSFER-INB -> credit
+        Decimal("-3000.00"),  # ATM WDL -> debit
+    ]
+    assert txns[0].txn_date == date(2021, 4, 1)
+    assert txns[0].utr == "412345678901"
+
+
+def test_sbi_credit_card_parse():
+    txns = parse_sbi_statement(_fixture("sbi_credit-jan-2025.txt"))
+    assert len(txns) == 8
+    # purchases/fees are debit (negative); payments/refunds carry a "Cr" marker
+    assert txns[0].amount == Decimal("-1234.56")
+    assert txns[3].amount == Decimal("5000.00")     # PAYMENT RECEIVED ... Cr
+    assert txns[3].txn_date == date(2025, 1, 8)
+    assert txns[4].amount == Decimal("1234.56")     # REFUND ... Cr
+    assert txns[7].amount == Decimal("-53.82")      # GST
+
+
+def test_pnb_statement_parse():
+    # collapsed Withdrawal/Deposit columns -> sign from running-balance arithmetic
+    p = Path(__file__).resolve().parent / "fixtures" / "pnb" / "pnb_savings-may-2023.txt"
+    txns = load_bank_statement(str(p), "pnb")
+    assert len(txns) == 7
+    amounts = [t.amount for t in txns]
+    assert amounts == [
+        Decimal("-25000.00"), Decimal("40000.00"), Decimal("-2000.00"),
+        Decimal("59500.00"), Decimal("-8500.00"), Decimal("16200.00"),
+        Decimal("-66700.00"),
+    ]
+    assert txns[1].utr == "N042718362538143"
+    assert txns[2].utr == "426784531012"
+
+
+def test_dbs_statement_parse():
+    p = Path(__file__).resolve().parent / "fixtures" / "dbs" / "dbs_savings-may-2019.txt"
+    txns = load_bank_statement(str(p), "dbs")
+    assert len(txns) == 10
+    # net movement = closing - opening = 27,995.89 - 3,435.89 = 24,560.00
+    assert sum((t.amount for t in txns), Decimal("0")) == Decimal("24560.00")
+    assert txns[2].amount == Decimal("20000.00")   # NEFT credit
+    assert txns[7].amount == Decimal("-6200.00")   # ATM debit
+
+
+def test_triage_exceptions():
+    s = [t("U1", "100.00", 15)]
+    b = [t("U1", "95.00", 16)]
+    r = match(s, b)
+    exc = classify(r, as_of=date(2026, 8, 20))
+    seen = []
+    out = triage_exceptions(exc, lambda p: seen.append(p) or "OK")
+    assert out == "OK"
+    assert seen and "FEE_DRIFT" in seen[0]
+    assert triage_exceptions([], lambda p: "unused") == ""
+
+
+def test_cli_reconcile_end_to_end():
+    from settleflow.__main__ import main
+    d = tmp_dir()
+    sett = _write(Path(d) / "sett.csv",
+        "id,amount,status,fees,tax,utr,created_at\n"
+        "setl_1,3.00,processed,0.0,0.0,UTR1,2025-12-25T00:00:00\n"
+        "setl_2,999.00,processed,0.0,0.0,UTR2,2025-12-26T00:00:00\n")
+    bank = Path(__file__).resolve().parent / "fixtures" / "sbi" / "yono_savings_multi_jan_2026.txt"
+    outdir = Path(d) / "cli-out"
+    rc = main(["reconcile", "--settlements", str(sett), "--vendor", "razorpay_settlement_csv",
+               "--bank", "sbi", "--statement", str(bank), "--out-dir", str(outdir)])
+    assert rc == 0
+    assert (outdir / "tally.csv").exists()
+    assert "MATCHED" in (outdir / "tally.csv").read_text(encoding="utf-8")
+    assert (outdir / "exceptions.csv").exists()
 
 
 if __name__ == "__main__":

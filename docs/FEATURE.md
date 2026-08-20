@@ -20,21 +20,21 @@ _(none — every tracked item is either done below or deferred with a reason in 
 | 8 | SBI tab-separated `.xls` delimiter fix | done | `e2f16e4` |
 | 9 | SBI bank-statement **PDF** parser (YONO text layout) | done | D-21 |
 | 10 | Kotak Dr/Cr combined-amount statement (auto-detect) | done | D-22 |
+| 11 | PNB + DBS bank statements (running-balance sign recovery) | done | D-23 |
+| 12 | SBI legacy netbanking + SBI credit-card parsers | done | D-23 |
+| 13 | LLM triage hook (`triage_exceptions`, provider-agnostic) | done | D-23 |
+| 14 | End-to-end CLI (`python -m settleflow reconcile`) | done | D-23 |
 
 ## Backlog (ordered)
 
 | # | Feature | Notes |
 |---|---|---|
-| 9 | SBI statement **PDF** parser | done for YONO text layout (D-21); netbanking + OCR deferred below |
-| 10 | SBI legacy netbanking PDF layout | deferred — `PdfLayoutError`; day/month/year split across wrapped lines; use the CSV export |
-| 11 | Scanned SBI PDFs (OCR) | deferred — `PdfScannedError`; OCR is a separate unbuilt layer |
-| 12 | Cashfree settlement-recon (two-section file) | dedicated parser; schema in `docs/SCHEMAS.md` |
-| 13 | PhonePe settlement report | confirm `PaymentType`/date format first |
-| 14 | Juspay settlement file | confirm money unit first |
-| 15 | Kotak "bankii" variant B (Serial + separate Debit/Credit amount + Dr/Cr flag) | deferred — needs real sample (the combined-amount Dr/Cr layout is done, D-22) |
-| 16 | PNB statement (separate Withdrawal/Deposit columns) | deferred — empty cells collapse ambiguously in flattened text; needs coordinate-aware extraction or the raw PDF |
-| 17 | LLM triage call wired into the SaaS layer | core has `build_llm_prompt`; call is SaaS-side |
-| 18 | Hosted SaaS deployment (auth, multi-user) | later stage |
+| 15 | Scanned SBI PDFs (OCR) | deferred — `PdfScannedError`; OCR is a separate unbuilt layer |
+| 16 | Cashfree settlement-recon (two-section file) | deferred — no public sample; schema in `docs/SCHEMAS.md` |
+| 17 | PhonePe settlement report | deferred — no public sample; confirm `PaymentType`/date format |
+| 18 | Juspay settlement file | deferred — no public sample; confirm money unit |
+| 19 | Kotak "bankii" variant B (Serial + separate Debit/Credit amount + Dr/Cr flag) | deferred — needs a real sample |
+| 20 | Hosted SaaS deployment (auth, multi-user) | later stage |
 
 ## Feature template
 

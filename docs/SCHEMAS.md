@@ -74,11 +74,16 @@ the date+debit+credit names (HDFC ~2-3 rows, Axis ~row 20).
 | Axis | `Tran Date, CHQNO, PARTICULARS, DR, CR, BAL, SOL` | `dd-MM-yyyy` | pratik1235/burnrate `axis_bank_csv.py`; sagarbehere/finzytrack `axis-bank-nro.yaml` |
 | Kotak | Variant A: `Transaction Date, Description, Chq./Ref.No., Withdrawal Amt., Deposit Amt., Closing Balance` | `dd-MM-yyyy` | omprakash201194/spend-stack `kotak/csv-parser.ts` |
 | Kotak | Variant B: `Serial, Transaction date, Value date, Description, Chq / Ref No., Debit amount, Credit amount, Balance, Dr/Cr` | `%d-%m-%Y` | jasimmk/bankii `in_kotak.py` |
+| PNB | `Transaction Date, Cheque Number, Withdrawal, Deposit, Balance, Narration` (collapsed columns — sign from running balance) | `YYYY/MM/DD` | raptar231 `fixtures/pnb/pnb_savings-may-2023.txt` |
+| DBS | `Date, Transaction Details, Withdrawal (INR), Deposit (INR), Balance (INR)` (collapsed columns — sign from running balance) | `DD/MM/YYYY` | raptar231 `fixtures/dbs/dbs_savings-may-2019.txt` |
 
 Notes: SBI native download is tab-separated ".xls" with BOM/CRLF and an
 `OPENING BALANCE` row (skipped by the loader). ICICI has no native CSV export
 (Excel/ZIP only); the "CSV" users get is the Excel saved-as-CSV. Kotak variant
-B is documented above but not yet wired — auto-detect when a real sample lands.
+B (bankii) is documented above but not yet wired — auto-detect when a real
+sample lands. PNB/DBS use separate Withdrawal/Deposit columns whose blank cells
+collapse in the extracted text, so the sign is recovered from running-balance
+arithmetic (`parse_bank_text`, D-23), not a two-column map.
 
 Kotak also ships a **combined-amount** netbanking statement:
 `Date, Narration, Chq/Ref No., Withdrawal (Dr) / Deposit (Cr), Balance` — a
@@ -87,21 +92,22 @@ single amount column with an explicit Dr/Cr marker ("347.00 Dr" = debit,
 (header carries "(Dr)" and "(Cr)") and routes to `parse_drcr_statement` (D-22).
 Source: `raptar231` fixture `tests/fixtures/kotak/kotak_savings-jul-2025.txt`.
 
-## Bank statements (PDF, SBI — wired for YONO text layer)
+## Bank statements (PDF / text, SBI — YONO, netbanking, credit card)
 
-Sanjay's SBI statement is a PDF, not a CSV. `settleflow/pdf.py` parses the
-**modern YONO / e-statement** transaction table from the PDF text layer:
+Sanjay's SBI statement is a PDF, not a CSV. `settleflow/pdf.py` parses three
+SBI layouts from the text layer, auto-dispatched by `parse_sbi_statement`:
 
-- Header (6 cols): `Date, Transaction Reference, Ref.No./Chq.No., Credit, Debit, Balance`
-  (note: **Credit before Debit** — opposite of the CSV header above).
-- Money: INR rupees, plain decimal (no ₹), one of Credit/Debit populated per row
-  (the other is `-`); balance is the running total and is always present.
-- Date: `dd-mm-yy` (also accepts `dd-mm-yyyy`). Statement may span multiple
-  pages and contain more than one account table (e.g. a loan account and a
-  savings account) — the parser collects transactions from every table.
-- Long narrations wrap onto their own extracted line; rows are reconstructed
-  from the trailing money columns, never a guessed column width.
-- Password-locked PDFs -> `PdfEncryptedError`; image-only (scanned) PDFs ->
-  `PdfScannedError`; the legacy netbanking layout -> `PdfLayoutError` (deferred).
-- Source: anonymised text fixtures from the Apache-2.0
-  `raptar231/indian-bank-statement-parser` (`tests/fixtures/sbi/`, see NOTICE.md).
+- **YONO / e-statement** (modern default): `Date, Transaction Reference,
+  Ref.No./Chq.No., Credit, Debit, Balance` (Credit before Debit). Rows are
+  reconstructed from the trailing money columns; narrations may wrap.
+- **Legacy netbanking**: `Txn Date, Value Date, Description, Ref No./Cheque
+  No., Debit, Credit, Balance`; dates are `dd MMM` with the year split onto a
+  following `yyyy yyyy` line (PDF text-extraction artifact). Sign from
+  description heuristics (BY = credit, TO = debit).
+- **Credit card**: `Date, Description, Amount (Rs.)`; payments/refunds carry a
+  trailing `Cr` marker (credit), everything else is debit.
+
+Money: INR rupees, plain decimal. Password-locked PDFs -> `PdfEncryptedError`;
+image-only (scanned) PDFs -> `PdfScannedError` (OCR is a separate unbuilt
+layer). Source: anonymised text fixtures from the Apache-2.0
+`raptar231/indian-bank-statement-parser` (`tests/fixtures/sbi/`, see NOTICE.md).

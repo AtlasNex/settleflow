@@ -27,10 +27,12 @@ from .parsers import (
     load_bank_statement_csv,
     load_csv,
     load_recon_csv,
+    parse_bank_text,
     parse_drcr_statement,
     parse_razorpay_recon,
     parse_razorpay_settlements,
 )
+from .pdf import parse_sbi_statement
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,15 @@ BANK_STATEMENT_MAPS: dict[str, BankColumnMap | None] = {
 }
 
 
+# Flattened-text banks whose debit/credit columns collapse in extracted text;
+# the sign is recovered from the running balance (see parse_bank_text). PNB
+# prints narration AFTER the balance, DBS BEFORE the amount.
+TEXT_BANK_PARSERS = {
+    "pnb": lambda raw: parse_bank_text(raw, narration_after=True),
+    "dbs": lambda raw: parse_bank_text(raw, narration_after=False),
+}
+
+
 # ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
@@ -170,16 +181,24 @@ def load_settlement_csv(path, vendor: str) -> list[Txn]:
 
 
 def load_bank_statement(path, bank: str) -> list[Txn]:
-    """Load a bank statement using its registered map.
+    """Load a bank statement using its registered parser.
 
-    A statement whose amount column carries an explicit Dr/Cr marker (Kotak
-    netbanking) is auto-detected and parsed directly — its single combined
-    amount column has no separate debit/credit columns to map. Everything else
-    goes through the two-column map below.
+    Two auto-detected text formats are routed by content, not column map:
+    - a Dr/Cr combined-amount statement (Kotak netbanking), and
+    - a flattened-text collapsed-column statement (PNB/DBS, where the running
+      balance recovers the debit/credit sign).
+    Everything else goes through the two-column map below.
     """
     raw = Path(path).read_text(encoding="utf-8-sig")
     if "(Dr)" in raw and "(Cr)" in raw:
         return parse_drcr_statement(raw)
+    upper = raw.upper()
+    # SBI statement TEXT (YONO / credit card) — content-routed, not a column map
+    if ("TRANSACTION REFERENCE" in upper or "CREDIT CARD STATEMENT" in upper
+            or "AMOUNT (RS.)" in upper):
+        return parse_sbi_statement(raw)
+    if bank in TEXT_BANK_PARSERS:
+        return TEXT_BANK_PARSERS[bank](raw)
     if bank not in BANK_STATEMENT_MAPS:
         raise KeyError(f"unknown bank {bank!r}; register it in BANK_STATEMENT_MAPS")
     cm = BANK_STATEMENT_MAPS[bank]

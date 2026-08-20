@@ -52,8 +52,7 @@ paired with its reason (full reasoning in `docs/DECISIONS.md`).
   same (amount, date). This is a deliberate first-pass simplification; the upgrade path
   is UTR-based disambiguation or order-level matching (Phase 2, now built via
   `match_orders`).
-- PDF bank statements: the modern SBI YONO **text-layer** layout is parsed
-  (`settleflow/pdf.py`, D-21). Still deferred: (a) the legacy netbanking PDF
-  layout (day/month/year split across wrapped lines -> `PdfLayoutError`; use the
-  CSV export), and (b) scanned/image-only PDFs (`PdfScannedError`; OCR is a
-  separate unbuilt layer).
+- PDF bank statements: the modern SBI YONO, the legacy netbanking, and the
+  credit-card layouts are all parsed (`settleflow/pdf.py`, D-21/D-23). Still
+  deferred: scanned/image-only PDFs (`PdfScannedError`; OCR is a separate
+  unbuilt layer).

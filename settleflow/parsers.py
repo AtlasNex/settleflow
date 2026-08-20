@@ -246,6 +246,170 @@ def load_bank_statement_drcr(path: str | Path) -> list[Txn]:
     return parse_drcr_statement(Path(path).read_text(encoding="utf-8-sig"))
 
 
+# ---------------------------------------------------------------------------
+# Generic flattened-text bank statement parser (collapsed debit/credit columns).
+#
+# PNB, DBS and others print separate Withdrawal/Deposit columns whose blank
+# cells collapse out of the extracted text, so a row only shows the transaction
+# amount followed by the running balance. The debit/credit sign is recovered by
+# running-balance arithmetic against the opening balance (prev + amount ==
+# balance -> credit; prev - amount == balance -> debit), falling back to a
+# Dr/Cr marker and then description heuristics. This is the same proven
+# technique as raptar231/indian-bank-statement-parser (Apache-2.0).
+# ---------------------------------------------------------------------------
+
+_BANK_AMOUNT = re.compile(r"[\d,]+\.\d{2}")
+_OPENING_BAL = re.compile(r"Opening\s+Balance[.:\s]*(?:INR\s*)?([\d,]+\.\d{2})", re.IGNORECASE)
+_MARKER = re.compile(r"([\d,]+\.\d{2})\s*(Dr|Cr)\b", re.IGNORECASE)
+_SKIP_LINE = re.compile(
+    r"^(?:Opening|Closing)\s+Balance|Sub\s*[- ]?Total|Total\b|"
+    r"Statement\s+(?:Period|For)|A/C|Account\s+(?:Number|No|Type)|"
+    r"Branch|IFSC|Page\b|Date\s+Transaction|Transaction\s+Date|"
+    r"Cheque\s+Number|Withdrawal|Deposit|Transaction\s+Details",
+    re.IGNORECASE,
+)
+_CREDIT_HINT = re.compile(r"\bCr\b|REFUND|SALARY|DEPOSIT|INWARD|NEFT|RTGS|INTEREST", re.IGNORECASE)
+_REF_PATTERNS = [
+    re.compile(r"UPI/(?:DR|CR)/(\d+)", re.IGNORECASE),
+    re.compile(r"\bUTR\s*(?:NO\.?)?[:]?\s*([A-Z0-9]+)", re.IGNORECASE),
+    re.compile(r"([A-Z]?\d{12,})"),
+]
+
+
+def _extract_ref(narration: str | None) -> str | None:
+    """Pull a UPI reference / UTR / 12+ digit run out of a narration."""
+    if not narration:
+        return None
+    for pat in _REF_PATTERNS:
+        m = pat.search(narration)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _is_date_token(tok: str) -> bool:
+    try:
+        parse_date(tok)
+        return True
+    except ValueError:
+        return False
+
+
+def _block_narration(block: list[str], amounts: list[tuple], narration_after: bool) -> str:
+    """Reassemble the narration from a transaction block.
+
+    `amounts` is a list of (text, line_idx, start, end) for every money token.
+    PNB prints the narration AFTER the balance; DBS prints it BEFORE the amount.
+    """
+    parts: list[str] = []
+    if narration_after:
+        bal_line, _, bal_end = amounts[-1][1], amounts[-1][2], amounts[-1][3]
+        for i, ln in enumerate(block):
+            if i == bal_line:
+                tail = ln[bal_end:].strip()
+                if tail:
+                    parts.append(tail)
+            elif ln.strip():
+                parts.append(ln.strip())
+    else:
+        first_line = amounts[0][1]
+        for i, ln in enumerate(block):
+            if i == 0:
+                date_len = len(block[0].split()[0])
+                if first_line == 0:
+                    seg = ln[date_len:amounts[0][2]]
+                else:
+                    seg = ln[date_len:]
+            else:
+                line_amts = [a for a in amounts if a[1] == i]
+                seg = ln[:line_amts[0][2]] if line_amts else ln
+            seg = seg.strip()
+            if seg:
+                parts.append(seg)
+    nar = re.sub(r"^[\s\-:;]+|[\s\-:;]+$", "", " ".join(parts))
+    return re.sub(r"\s+", " ", nar).strip()
+
+
+def _parse_bank_block(block, prev_balance, narration_after):
+    """Parse one transaction block -> (Txn, balance) or None."""
+    try:
+        txn_date = parse_date(block[0].split()[0])
+    except ValueError:
+        return None
+
+    amounts = []
+    for i, ln in enumerate(block):
+        for mm in _BANK_AMOUNT.finditer(ln):
+            amounts.append((mm.group(0), i, mm.start(), mm.end()))
+    if len(amounts) < 2:
+        return None
+
+    balance = Decimal(amounts[-1][0].replace(",", ""))
+    amount = Decimal(amounts[-2][0].replace(",", ""))
+
+    narration = _block_narration(block, amounts, narration_after)
+
+    marker = _MARKER.search(" ".join(block))
+    if marker:
+        sign = 1 if marker.group(2).upper() == "CR" else -1
+    elif prev_balance is not None:
+        if prev_balance + amount == balance:
+            sign = 1
+        elif prev_balance - amount == balance:
+            sign = -1
+        else:
+            sign = 1 if _CREDIT_HINT.search(narration) else -1
+    else:
+        sign = 1 if _CREDIT_HINT.search(narration) else -1
+
+    return (
+        Txn(utr=_extract_ref(narration), amount=Decimal(sign) * amount,
+            txn_date=txn_date, ref=narration or None),
+        balance,
+    )
+
+
+def parse_bank_text(text: str, *, narration_after: bool = False) -> list[Txn]:
+    """Parse a flattened-text bank statement with collapsed debit/credit columns.
+
+    `narration_after=True` for PNB (narration after the balance), False for DBS
+    (narration before the amount). Debit -> negative amount, credit -> positive.
+    """
+    lines = [ln.strip() for ln in text.replace("\r", "\n").split("\n")]
+    lines = [ln for ln in lines if ln]
+
+    m = _OPENING_BAL.search(text)
+    prev_balance = Decimal(m.group(1).replace(",", "")) if m else None
+
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for ln in lines:
+        if _SKIP_LINE.match(ln):
+            continue
+        toks = ln.split()
+        if toks and _is_date_token(toks[0]):
+            current = [ln]
+            blocks.append(current)
+        elif current is not None:
+            current.append(ln)
+
+    txns: list[Txn] = []
+    for block in blocks:
+        parsed = _parse_bank_block(block, prev_balance, narration_after)
+        if parsed is None:
+            continue
+        txn, balance = parsed
+        txns.append(txn)
+        prev_balance = balance
+    return txns
+
+
+def load_bank_statement_text(path: str | Path, *, narration_after: bool = False) -> list[Txn]:
+    """Load a flattened-text bank statement (PNB/DBS) into Txn rows."""
+    return parse_bank_text(Path(path).read_text(encoding="utf-8-sig"),
+                           narration_after=narration_after)
+
+
 def _paise(value) -> Decimal:
     """Razorpay returns money in the smallest currency unit (paise). Convert to rupees."""
     return Decimal(value) / Decimal("100")

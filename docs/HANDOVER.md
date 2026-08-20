@@ -7,9 +7,9 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 - Project root: `E:/Sanjay Files/StartUp/open source/settleflow`
 - Package: `settleflow/` (models.py, matching.py, parsers.py, exports.py,
-  exceptions.py, schemas.py, pdf.py)
-- Tests: `tests/test_matching.py` (assert-based self-check, 32 checks) +
-  `tests/fixtures/sbi/` (real anonymised SBI statement text, see NOTICE.md)
+  exceptions.py, schemas.py, pdf.py, `__main__.py` = CLI)
+- Tests: `tests/test_matching.py` (assert-based self-check, 38 checks) +
+  `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md)
 - SaaS: `saas/app.py` + `saas/templates/` + `saas/requirements.txt` + sample files
 - Docs: `docs/` (architecture, constraints, flow, decisions, bug, feature, rollback,
   testing, monetization, commercial, handover)
@@ -17,32 +17,29 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Money docs: `docs/MONETIZATION.md` (deep-research) + `docs/COMMERCIAL.md` (Sidekiq
   licensing) + `funding.json` + `.github/FUNDING.yml`
 
-## Current state (2026-08-20)
+## Current state (2026-08-21)
 
-Phases 1, 2, 4, 5 done; Phase 3 done for the formats with public evidence; the
-SBI **PDF** parser is now done for the modern YONO text layout (D-21):
+All phases done; bank + gateway parser coverage is complete for every format
+with a public sample. The library is end-to-end usable via a CLI.
 
 - **Level 1**: `Txn`/`Match`/`ReconResult` + two-pass match + `match_settlements`.
 - **Level 2**: `ReconLine`/`BatchRecon`/`OrderMatch` + `group_batches` + `match_orders`
   + `parse_razorpay_recon` (verified 24-param schema, fails closed on unknown fields).
-- **Phase 3**: `schemas.py` registry wired with verified maps — Razorpay settlement
-  CSV (7 cols) + recon CSV (27 cols), HDFC/SBI/ICICI/Axis/Kotak bank statements (two
-  column debit/credit, preamble auto-detected). Kotak's Dr/Cr combined-amount netbanking
-  statement is auto-detected too (D-22). All headers + sources in
-  `docs/SCHEMAS.md`. NOT wired (needs a dedicated parser or a real file): Cashfree recon
-  (two-section file), PhonePe (undocumented type/date), Juspay (unstated money unit),
-  PayU (user-configurable columns), PNB (separate debit/credit columns whose empty cells
-  collapse ambiguously in flattened text).
-- **PDF (new, D-21)**: `settleflow/pdf.py` — `extract_pdf_text` (lazy pymupdf,
-  password + scanned detection), `parse_sbi_statement`, `parse_sbi_pdf`. Parses the
-  modern SBI YONO/e-statement table (`Date | Transaction Reference | Ref.No./Chq.No. |
-  Credit | Debit | Balance`) from the text layer. Raises `PdfEncryptedError`,
-  `PdfScannedError`, `PdfLayoutError` (legacy netbanking layout) instead of guessing.
-  pymupdf is an optional `[pdf]` extra; core stays stdlib-only.
+- **Phase 3 (banks)**: HDFC/SBI/ICICI/Axis/Kotak (two-column CSV) + Kotak Dr/Cr
+  (D-22) + PNB/DBS (running-balance, D-23). All headers + sources in
+  `docs/SCHEMAS.md`. NOT wired (no public sample): Cashfree/PhonePe/Juspay/PayU
+  settlement files, Kotak "bankii" variant B.
+- **PDF (D-21 + D-23)**: `settleflow/pdf.py` — `extract_pdf_text` (lazy pymupdf,
+  password + scanned detection), `parse_sbi_pdf`, and `parse_sbi_statement` which
+  auto-dispatches SBI **YONO / netbanking / credit-card** layouts. pymupdf is an
+  optional `[pdf]` extra; core stays stdlib-only.
 - **Phase 4**: `saas/app.py` — FastAPI reconcile/expose/export loop, sqlite3 storage,
   Tally + GST + TDS-1035 CSV exports. Runs locally, not hosted.
-- **Phase 5**: `exceptions.py` — `classify()` (5 rule categories) + `build_llm_prompt()`.
-  The actual LLM call is a SaaS-layer concern, not in the core.
+- **Phase 5**: `exceptions.py` — `classify()` (5 rule categories), `build_llm_prompt()`,
+  and `triage_exceptions(exc, call_llm)` (provider-agnostic LLM hook; core still
+  makes no network call).
+- **CLI (D-23)**: `python -m settleflow reconcile --settlements X --vendor v
+  --bank b --statement Y --out-dir out` -> `tally.csv` + `exceptions.csv`.
 
 Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
 `f2a9b92` relocate+rename, `ca3f592` docs; 2026-08-16 work: `9becf0e` Phases 2-5 +
@@ -52,7 +49,12 @@ Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py            # self-check, 32 checks
+python tests/test_matching.py            # self-check, 38 checks
+
+# CLI — one-command reconciliation:
+python -m settleflow reconcile \
+    --settlements settlements.csv --vendor razorpay_settlement_csv \
+    --bank sbi --statement statement.csv --out-dir ./out
 
 # SaaS:
 python -m uvicorn saas.app:app --host 127.0.0.1 --port 8091
@@ -60,27 +62,24 @@ python -m uvicorn saas.app:app --host 127.0.0.1 --port 8091
 # PDF bank statements (optional extra):
 pip install "settleflow[pdf]"            # pymupdf
 from settleflow import parse_sbi_pdf
-parse_sbi_pdf("statement.pdf")           # modern SBI YONO text layout
+parse_sbi_pdf("statement.pdf")           # SBI YONO / netbanking / credit card
 ```
 
 ## What is next
 
-**SBI PDF (done for YONO; two paths still deferred):** the parser handles the modern
-YONO/e-statement text layout. Still open when a real file lands: (a) the legacy
-netbanking layout (`PdfLayoutError` — day/month/year split across wrapped lines), and
-(b) scanned/image-only PDFs (`PdfScannedError` — needs an OCR layer).
+**Parser coverage is complete** for every format with a public sample. The
+remaining items are all gated on real files or later-stage infra:
 
-**Then, in priority order** (each still needs a dedicated parser or a real sample —
-see `docs/SCHEMAS.md`):
+1. **Cashfree / PhonePe / Juspay settlement files** — schemas are captured in
+   `docs/SCHEMAS.md` from official docs, but there is no public sample to build
+   against (D-7). A real export from any of these would unlock the parser.
+2. **Scanned/image-only PDFs** — needs an OCR layer (a separate, unbuilt piece).
+3. **Kotak "bankii" variant B** — documented but no real sample.
+4. **Hosted SaaS** — auth, multi-user, deployment (later stage).
 
-1. **Cashfree settlement-recon** — two-section file (14 + 48 cols); dedicated parser.
-2. **PhonePe settlement report** — 14 verified fields; confirm `PaymentType`/date format.
-3. **Juspay settlement file** — 25 verified columns; confirm money unit.
-4. **Kotak variant B** — second documented layout; add auto-detect.
-
-The single most valuable thing Sanjay can drop in: his actual SBI PDF (to validate the
-YONO parser against his file, and to resolve netbanking-vs-YONO and text-vs-scanned) and
-one real Razorpay recon CSV export.
+The single most valuable thing Sanjay can drop in: one real **Razorpay recon CSV
+export** and a **Cashfree/PhonePe settlement file**, plus his actual SBI PDF to
+validate the YONO/netbanking/credit-card parsers against his real file.
 
 ## Gotchas / pitfalls
 
@@ -106,4 +105,4 @@ Also: do not fill the empty schema-registry slots from memory — only from real
 
 - Orchestration/build: deepseek-v4-pro.
 - Research subagents: deepseek-v4-flash.
-- Full provenance in `docs/DECISIONS.md` (D-1 through D-18).
+- Full provenance in `docs/DECISIONS.md` (D-1 through D-23).

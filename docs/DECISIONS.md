@@ -200,3 +200,26 @@ survived because the OSS component layer is genuinely un-owned.
   `bank="kotak"` works for either variant. PNB is deferred (ambiguous flattened
   text — needs coordinate-aware extraction or the raw PDF).
 - **Model:** deepseek-v4-pro. **Date:** 2026-08-20.
+
+### D-23: Complete bank coverage + LLM triage + CLI (end-to-end)
+- **Why:** "complete all the things end to end." Applied the D-19 "get the files
+  yourself" precedent to source real anonymised fixtures for PNB, DBS, SBI
+  netbanking and SBI credit card from `raptar231/indian-bank-statement-parser`
+  (Apache-2.0), and adopted its proven technique: recover the debit/credit sign
+  from running-balance arithmetic when separate Debit/Credit columns collapse in
+  the extracted text (this reverses D-22's earlier "PNB deferred" call).
+- **Added:** `parse_bank_text` (generic collapsed-column parser with
+  narration-before vs narration-after) -> PNB + DBS wired via TEXT_BANK_PARSERS;
+  `parse_sbi_credit_card` (Date|Description|Amount + trailing Cr marker);
+  `parse_sbi_netbanking` (legacy "Txn Date|Value Date|..." with the year split
+  onto a "yyyy yyyy" line); `parse_sbi_statement` now auto-dispatches
+  YONO/netbanking/credit-card; `triage_exceptions` (provider-agnostic LLM hook,
+  `call_llm(prompt) -> str`, core still makes no network call); a CLI
+  (`python -m settleflow reconcile -> tally.csv + exceptions.csv`).
+  `load_bank_statement` now content-routes Dr/Cr, PNB/DBS and SBI text.
+  Reference numbers (UPI/UTR/12+ digit) are extracted into Txn.utr.
+- **Deferred (honest):** Cashfree/PhonePe/Juspay settlement files (no public
+  sample exists; their schemas are already captured in SCHEMAS.md from official
+  docs); scanned/image-only PDFs (OCR is a separate unbuilt layer); the hosted
+  SaaS (later stage). Kotak "bankii" variant B still needs a real sample.
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-21.

@@ -129,3 +129,17 @@ def build_llm_prompt(exceptions: list[Exception]) -> str:
             f"ref={e.ref or '-'} :: {e.detail}"
         )
     return "\n".join(lines)
+
+
+def triage_exceptions(exceptions: list[Exception], call_llm) -> str:
+    """Run the LLM triage hook over classified exceptions.
+
+    `call_llm` is a provider-agnostic callable: ``call_llm(prompt: str) -> str``.
+    The core still makes no network call — the caller supplies the callable, so
+    any provider (Gemini, OpenAI, DeepSeek, a local model) plugs in without the
+    library knowing about it. Returns the model's raw response, or "" when
+    there is nothing to triage.
+    """
+    if not exceptions:
+        return ""
+    return call_llm(build_llm_prompt(exceptions))

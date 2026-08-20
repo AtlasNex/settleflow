@@ -112,3 +112,22 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
 - **Verified:** self-check 33/33 (Kotak Dr/Cr auto-detect; totals reconcile with the
   statement's own sub-totals 10,069.00 Dr / 55,125.00 Cr).
 - **Docs:** SCHEMAS (Kotak Dr/Cr note), DECISIONS D-22, FEATURE, HANDOVER.
+
+## 2026-08-21 — Session 6 (complete end-to-end: banks, LLM triage, CLI)
+
+- **Model:** deepseek-v4-pro.
+- **Did:** "complete all the things end to end." Sourced real anonymised fixtures for
+  PNB, DBS, SBI netbanking and SBI credit card from `raptar231` (Apache-2.0) and adopted
+  its running-balance technique — which reverses D-22's earlier "PNB deferred" call.
+  Added `parse_bank_text` (PNB+DBS), `parse_sbi_credit_card`, `parse_sbi_netbanking`;
+  `parse_sbi_statement` now auto-dispatches YONO/netbanking/credit-card.
+  `load_bank_statement` content-routes Dr/Cr, PNB/DBS and SBI text. Added
+  `triage_exceptions` (provider-agnostic LLM hook) and a CLI
+  (`python -m settleflow reconcile` -> tally.csv + exceptions.csv). Version 0.6.0 -> 0.7.0.
+- **Deferred (honest):** Cashfree/PhonePe/Juspay settlement files (no public sample;
+  schemas already in SCHEMAS.md), scanned/OCR PDFs, Kotak "bankii" variant B, hosted SaaS.
+- **Verified:** self-check 38/38; CLI exercised end-to-end (match + classify + export);
+  `hermes verify --skip-start` OK (full run still hangs in the Windows start-phase
+  teardown — a harness issue, not a code defect; /health returns 200 during a live run).
+- **Docs:** SCHEMAS (PNB/DBS + SBI netbanking/credit), DECISIONS D-23, FEATURE, HANDOVER,
+  README, CONSTRAINTS, SESSION-LOG.
