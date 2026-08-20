@@ -47,4 +47,7 @@ paired with its reason (full reasoning in `docs/DECISIONS.md`).
 
 - `match()`'s amount+date fallback can mis-pair when two distinct bank lines share the
   same (amount, date). This is a deliberate first-pass simplification; the upgrade path
-  is UTR-based disambiguation or order-level matching (Phase 2).
+  is UTR-based disambiguation or order-level matching (Phase 2, now built via
+  `match_orders`).
+- PDF bank statements (Sanjay's SBI file) are not parsed yet — PDF extraction is a
+  separate layer (ATL-72), not part of the CSV trust boundary.

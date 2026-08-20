@@ -4,26 +4,38 @@ A start-to-finish trail anyone can pick up cold.
 
 ## In progress
 
-### Phase 2 — line-item decomposition
+### SBI bank-statement PDF parser (ATL-72)
 
-- **What:** parse the Razorpay `Fetch Settlement Recon` response (per-transaction rows:
-  `entity_id`, `type` payment/refund/transfer/adjustment, `debit`/`credit`, `amount`,
-  `fee`, `tax`, `settlement_id`, `payment_id`, `order_id`) and reconcile each batch's
-  line items against the order management system: gross - MDR - GST-on-MDR - refunds = net.
-- **Why:** settlement-level matching (Phase 1) tells you *which batch*, but not *which
-  orders*; the order-level truth is what a CA actually needs.
-- **Schema:** already captured in research (Razorpay docs, verbatim).
-- **Status:** not started.
+- **What:** parse an SBI statement **PDF** (not CSV) into `Txn` rows. `pypdf` +
+  `pymupdf` already installed. Resolve on the real file: password (SBI PDFs often
+  locked), text-vs-scanned (OCR path), table layout.
+- **Why:** Sanjay's own SBI statement is a PDF; the library has no PDF path yet.
+- **Status:** blocked — needs Sanjay's actual PDF (path + password).
+
+## Done (this session, 2026-08-16)
+
+| # | Feature | Status | Commit |
+|---|---|---|---|
+| 1 | Level-1 matching engine + Razorpay settlement parser | done | `ccf753b`/`aad10fc` |
+| 2 | Line-item decomposition (Razorpay recon 24-param schema) + order matching | done | `9becf0e` |
+| 3 | Bank-statement parsers HDFC/SBI/ICICI/Axis/Kotak + Razorpay CSV/recon | done | `14c6824` |
+| 4 | Thin SaaS (FastAPI reconcile/export/exception queue) | done (local) | `9becf0e` |
+| 5 | Exception classifier + LLM prompt builder | done | `9becf0e` |
+| 6 | Tally / GST / TDS-1035 exports | done | `9becf0e` |
+| 7 | Monetization research + commercial license + funding.json | done | `9becf0e` |
+| 8 | SBI tab-separated `.xls` delimiter fix | done | `e2f16e4` |
 
 ## Backlog (ordered)
 
 | # | Feature | Notes |
 |---|---|---|
-| 3 | More gateway parsers: Cashfree, PayU, PhonePe, Juspay | same pattern as Razorpay |
-| 4 | Bank statement parsers: HDFC, SBI, ICICI, Axis, Kotak | statement formats, narration parsing |
-| 5 | e-com TDS code 1035 classification | new IT Act, from 1 Apr 2026 |
-| 6 | Thin hosted SaaS (auto-ingest, exception queue, Tally/Zoho/GST exports) | the paid layer |
-| 7 | Agents on the unmatched 1-3% (LLM exception classification) | the moat |
+| 9 | SBI statement **PDF** parser | blocked on real file (ATL-72) |
+| 10 | Cashfree settlement-recon (two-section file) | dedicated parser; schema in `docs/SCHEMAS.md` |
+| 11 | PhonePe settlement report | confirm `PaymentType`/date format first |
+| 12 | Juspay settlement file | confirm money unit first |
+| 13 | Kotak statement variant B (auto-detect) | schema in `docs/SCHEMAS.md` |
+| 14 | LLM triage call wired into the SaaS layer | core has `build_llm_prompt`; call is SaaS-side |
+| 15 | Hosted SaaS deployment (auth, multi-user) | later stage |
 
 ## Feature template
 

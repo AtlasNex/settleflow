@@ -7,7 +7,8 @@ database, no deploy) until Phase 4, so rollback is git.
 
 - The codebase's commits are chronological and linear. Do not rewrite them.
 - Reference commits (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
-  `f2a9b92` relocate+rename.
+  `f2a9b92` relocate+rename, `ca3f592` docs, `9becf0e` Phases 2-5 + monetization,
+  `04eceba` verify manifest, `14c6824` Phase 3 schemas, `e2f16e4` SBI delimiter fix.
 
 ## Undo a bad commit (preferred: revert)
 

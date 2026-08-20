@@ -1,14 +1,14 @@
 # Bug
 
-A start-to-finish trail for anything broken. No known bugs at this time.
+A start-to-finish trail for anything broken. No open bugs at this time (all fixed).
 
 ## Known limitations (not bugs, but do not hide them)
 
 | # | Limitation | Where | Upgrade path |
 |---|---|---|---|
-| L-1 | `match()`'s amount+date fallback can mis-pair when two distinct bank lines share the same (amount, date) | `matching.py` pass 2 | UTR disambiguation, or order-level matching (Phase 2) |
-| L-2 | `parse_date` handles 5 formats only | `parsers.py` | add formats as real files demand (never guess) |
-| L-3 | Razorpay parser is settlement-level only; no line-item (`Fetch Settlement Recon`) decomposition yet | `parsers.py` | Phase 2 |
+| L-1 | `match()`'s amount+date fallback can mis-pair when two distinct bank lines share the same (amount, date) | `matching.py` pass 2 | UTR disambiguation, or order-level matching (Phase 2, built) |
+| L-2 | `parse_date` does not read a scan-only PDF (image, no text layer) | `parsers.py` | OCR path (ATL-72, needs a real scanned file) |
+| L-3 | Razorpay CSV amounts: sample shows rupees but API is paise — unit not yet confirmed against a real export | `schemas.py` | confirm against a real Razorpay CSV export |
 
 ## Reporting a bug
 
@@ -29,4 +29,5 @@ Use this template so a cold reader can reproduce:
 
 | # | Bug | Found | Fixed | Commit |
 |---|---|---|---|---|
-| - | (none yet) | - | - | - |
+| B-1 | SBI native export is tab-separated `.xls`; comma-only reader failed to find the header | 2026-08-16 | `csv.Sniffer` auto-detect delimiter in `load_bank_statement_csv` | `e2f16e4` |
+| B-2 | Razorpay recon CSV date `2022-06-07T13:33:57` unparseable | 2026-08-16 | strip trailing time in `parse_date` | `14c6824` |
