@@ -184,3 +184,19 @@ survived because the OSS component layer is genuinely un-owned.
   still holds. Fixtures vendored under `tests/fixtures/sbi/` with a NOTICE.md
   (Apache-2.0 attribution). Version bumped 0.4.0 -> 0.5.0.
 - **Model:** deepseek-v4-pro. **Date:** 2026-08-20.
+
+### D-22: Kotak Dr/Cr combined-amount statement — auto-detected
+- **Why:** Kotak's netbanking statement uses a SINGLE combined amount column
+  with an explicit Dr/Cr marker ("347.00 Dr" = debit, "35,000.00 Cr" = credit)
+  — a different layout from the two-column variant A already wired. The marker
+  makes the sign unambiguous in flattened text, so it is parseable without
+  coordinates (unlike PNB's separate Withdrawal/Deposit columns, whose empty
+  cells collapse ambiguously — deferred). Real anonymised fixture sourced from
+  `raptar231/indian-bank-statement-parser` (the D-19/D-21 precedent).
+- **Structural change:** `settleflow/parsers.py` gained `parse_drcr_statement`
+  (a trailing "amount Dr|Cr balance" trio, narration accumulated across wrapped
+  lines) + `load_bank_statement_drcr`. `load_bank_statement` now auto-detects
+  the Dr/Cr format (header carries "(Dr)" and "(Cr)") and routes to it, so
+  `bank="kotak"` works for either variant. PNB is deferred (ambiguous flattened
+  text — needs coordinate-aware extraction or the raw PDF).
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-20.

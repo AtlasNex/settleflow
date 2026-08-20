@@ -80,6 +80,13 @@ Notes: SBI native download is tab-separated ".xls" with BOM/CRLF and an
 (Excel/ZIP only); the "CSV" users get is the Excel saved-as-CSV. Kotak variant
 B is documented above but not yet wired — auto-detect when a real sample lands.
 
+Kotak also ships a **combined-amount** netbanking statement:
+`Date, Narration, Chq/Ref No., Withdrawal (Dr) / Deposit (Cr), Balance` — a
+single amount column with an explicit Dr/Cr marker ("347.00 Dr" = debit,
+"35,000.00 Cr" = credit). `load_bank_statement` auto-detects this layout
+(header carries "(Dr)" and "(Cr)") and routes to `parse_drcr_statement` (D-22).
+Source: `raptar231` fixture `tests/fixtures/kotak/kotak_savings-jul-2025.txt`.
+
 ## Bank statements (PDF, SBI — wired for YONO text layer)
 
 Sanjay's SBI statement is a PDF, not a CSV. `settleflow/pdf.py` parses the

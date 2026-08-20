@@ -20,12 +20,14 @@ Juspay settlement file (money unit unstated). See docs/SCHEMAS.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from .models import ReconLine, Txn
 from .parsers import (
     load_bank_statement_csv,
     load_csv,
     load_recon_csv,
+    parse_drcr_statement,
     parse_razorpay_recon,
     parse_razorpay_settlements,
 )
@@ -168,7 +170,16 @@ def load_settlement_csv(path, vendor: str) -> list[Txn]:
 
 
 def load_bank_statement(path, bank: str) -> list[Txn]:
-    """Load a bank statement CSV using its registered two-column map."""
+    """Load a bank statement using its registered map.
+
+    A statement whose amount column carries an explicit Dr/Cr marker (Kotak
+    netbanking) is auto-detected and parsed directly — its single combined
+    amount column has no separate debit/credit columns to map. Everything else
+    goes through the two-column map below.
+    """
+    raw = Path(path).read_text(encoding="utf-8-sig")
+    if "(Dr)" in raw and "(Cr)" in raw:
+        return parse_drcr_statement(raw)
     if bank not in BANK_STATEMENT_MAPS:
         raise KeyError(f"unknown bank {bank!r}; register it in BANK_STATEMENT_MAPS")
     cm = BANK_STATEMENT_MAPS[bank]

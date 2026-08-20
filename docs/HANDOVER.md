@@ -27,10 +27,12 @@ SBI **PDF** parser is now done for the modern YONO text layout (D-21):
   + `parse_razorpay_recon` (verified 24-param schema, fails closed on unknown fields).
 - **Phase 3**: `schemas.py` registry wired with verified maps — Razorpay settlement
   CSV (7 cols) + recon CSV (27 cols), HDFC/SBI/ICICI/Axis/Kotak bank statements (two
-  column debit/credit, preamble auto-detected). All headers + sources in
+  column debit/credit, preamble auto-detected). Kotak's Dr/Cr combined-amount netbanking
+  statement is auto-detected too (D-22). All headers + sources in
   `docs/SCHEMAS.md`. NOT wired (needs a dedicated parser or a real file): Cashfree recon
   (two-section file), PhonePe (undocumented type/date), Juspay (unstated money unit),
-  PayU (user-configurable columns).
+  PayU (user-configurable columns), PNB (separate debit/credit columns whose empty cells
+  collapse ambiguously in flattened text).
 - **PDF (new, D-21)**: `settleflow/pdf.py` — `extract_pdf_text` (lazy pymupdf,
   password + scanned detection), `parse_sbi_statement`, `parse_sbi_pdf`. Parses the
   modern SBI YONO/e-statement table (`Date | Transaction Reference | Ref.No./Chq.No. |

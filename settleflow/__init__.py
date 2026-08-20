@@ -16,11 +16,13 @@ from .matching import group_batches, match, match_orders, match_settlements, nor
 from .parsers import (
     RAZORPAY_RECON_KEYS,
     RAZORPAY_RECON_REQUIRED,
+    load_bank_statement_drcr,
     load_csv,
     load_razorpay_recon_json,
     load_recon_csv,
     parse_amount,
     parse_date,
+    parse_drcr_statement,
     parse_razorpay_recon,
     parse_razorpay_settlements,
 )
@@ -53,7 +55,7 @@ from .schemas import (
     load_vendor_recon_csv,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "BatchRecon",
@@ -74,10 +76,12 @@ __all__ = [
     "RAZORPAY_RECON_KEYS",
     "RAZORPAY_RECON_REQUIRED",
     "load_csv",
+    "load_bank_statement_drcr",
     "load_razorpay_recon_json",
     "load_recon_csv",
     "parse_amount",
     "parse_date",
+    "parse_drcr_statement",
     "parse_razorpay_recon",
     "parse_razorpay_settlements",
     "TDS_1035_CODE",

@@ -169,6 +169,80 @@ def load_bank_statement_csv(
     return txns
 
 
+def _is_money(tok: str) -> bool:
+    """True for a money token like '347.00' or '9,653.00' (Indian grouping)."""
+    return bool(re.compile(r"^\d[\d,]*\.\d{2}$").match(tok))
+
+
+# Kotak's netbanking statement (and some other banks) use a SINGLE combined
+# amount column with an explicit Dr/Cr marker rather than separate Debit/Credit
+# columns: "347.00 Dr" = debit, "35,000.00 Cr" = credit. The marker makes the
+# sign unambiguous in flattened text (unlike separate Debit/Credit columns,
+# whose empty cells collapse ambiguously).
+_DRCR_DATE = re.compile(r"^\d{1,2}-[A-Za-z]{3}-\d{2,4}$")  # 01-Jul-2025
+
+
+def parse_drcr_statement(text: str) -> list[Txn]:
+    """Parse a Dr/Cr-marker statement's text into Txn rows.
+
+    Each transaction ends with a trailing "amount Dr|Cr balance" trio; the
+    narration may wrap onto its own line, so it is accumulated until that trio
+    appears. Debit (Dr) -> negative amount, credit (Cr) -> positive. The
+    narration becomes Txn.ref; there is no separate reference column in this
+    format, so Txn.utr stays None.
+    """
+    lines = [ln.strip() for ln in text.replace("\r", "\n").split("\n")]
+    lines = [ln for ln in lines if ln]
+
+    txns: list[Txn] = []
+    cur_date = None
+    cur_narration: list[str] = []
+
+    for ln in lines:
+        # footer/aggregate rows must not be mistaken for transactions (the
+        # "Sub Total" line also carries Dr/Cr markers)
+        if any(m in ln for m in ("Opening Balance", "Closing Balance", "Sub Total")):
+            cur_date = None
+            cur_narration = []
+            continue
+        toks = ln.split()
+        if not toks:
+            continue
+        # trailing money trio: amount Dr|Cr balance
+        if (len(toks) >= 3 and toks[-2] in ("Dr", "Cr")
+                and _is_money(toks[-1]) and _is_money(toks[-3])):
+            amount = Decimal(toks[-3].replace(",", ""))
+            signed = -amount if toks[-2] == "Dr" else amount
+            lead = toks[:-3]
+            if lead:
+                if _DRCR_DATE.match(lead[0]):
+                    cur_date = parse_date(lead[0])
+                    cur_narration = lead[1:]
+                else:
+                    # narration wrapped onto the money row's first line
+                    cur_narration.extend(lead)
+            if cur_date is not None:
+                txns.append(Txn(utr=None, amount=signed, txn_date=cur_date,
+                                ref=" ".join(cur_narration) or None))
+            cur_date = None
+            cur_narration = []
+            continue
+        # a date at the start of a line opens a new transaction; anything else
+        # is a continuation of the current narration
+        if _DRCR_DATE.match(toks[0]):
+            cur_date = parse_date(toks[0])
+            cur_narration = toks[1:]
+        else:
+            cur_narration.extend(toks)
+
+    return txns
+
+
+def load_bank_statement_drcr(path: str | Path) -> list[Txn]:
+    """Load a Dr/Cr-marker bank statement (text/CSV) into Txn rows."""
+    return parse_drcr_statement(Path(path).read_text(encoding="utf-8-sig"))
+
+
 def _paise(value) -> Decimal:
     """Razorpay returns money in the smallest currency unit (paise). Convert to rupees."""
     return Decimal(value) / Decimal("100")

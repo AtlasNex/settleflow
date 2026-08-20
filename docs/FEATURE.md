@@ -19,6 +19,7 @@ _(none — every tracked item is either done below or deferred with a reason in 
 | 7 | Monetization research + commercial license + funding.json | done | `9becf0e` |
 | 8 | SBI tab-separated `.xls` delimiter fix | done | `e2f16e4` |
 | 9 | SBI bank-statement **PDF** parser (YONO text layout) | done | D-21 |
+| 10 | Kotak Dr/Cr combined-amount statement (auto-detect) | done | D-22 |
 
 ## Backlog (ordered)
 
@@ -30,9 +31,10 @@ _(none — every tracked item is either done below or deferred with a reason in 
 | 12 | Cashfree settlement-recon (two-section file) | dedicated parser; schema in `docs/SCHEMAS.md` |
 | 13 | PhonePe settlement report | confirm `PaymentType`/date format first |
 | 14 | Juspay settlement file | confirm money unit first |
-| 15 | Kotak statement variant B (auto-detect) | schema in `docs/SCHEMAS.md` |
-| 16 | LLM triage call wired into the SaaS layer | core has `build_llm_prompt`; call is SaaS-side |
-| 17 | Hosted SaaS deployment (auth, multi-user) | later stage |
+| 15 | Kotak "bankii" variant B (Serial + separate Debit/Credit amount + Dr/Cr flag) | deferred — needs real sample (the combined-amount Dr/Cr layout is done, D-22) |
+| 16 | PNB statement (separate Withdrawal/Deposit columns) | deferred — empty cells collapse ambiguously in flattened text; needs coordinate-aware extraction or the raw PDF |
+| 17 | LLM triage call wired into the SaaS layer | core has `build_llm_prompt`; call is SaaS-side |
+| 18 | Hosted SaaS deployment (auth, multi-user) | later stage |
 
 ## Feature template
 

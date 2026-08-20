@@ -600,6 +600,26 @@ def test_sbi_pdf_text_extraction_and_detection():
         pass
 
 
+def test_kotak_drcr_statement_auto_detect():
+    # Kotak netbanking: single combined amount column with Dr/Cr marker.
+    # load_bank_statement auto-detects "(Dr)"/"(Cr)" and routes to the Dr/Cr
+    # parser instead of the two-column map.
+    p = Path(__file__).resolve().parent / "fixtures" / "kotak" / "kotak_savings-jul-2025.txt"
+    txns = load_bank_statement(str(p), "kotak")
+    assert len(txns) == 10
+    assert txns[0].amount == Decimal("-347.00")     # UPI debit (Dr)
+    assert txns[0].txn_date == date(2025, 7, 1)
+    assert txns[1].amount == Decimal("35000.00")    # NEFT credit (Cr)
+    # wrapped narration is preserved (interest credit on 18-Jul)
+    assert txns[6].amount == Decimal("125.00")
+    assert txns[6].ref == "NEFT/INWARD/CR-ICICI/INTEREST CREDIT SB-A/1234567890/INT JUL25"
+    # totals reconcile with the statement's own sub-totals
+    dr = sum((-t.amount for t in txns if t.amount < 0), Decimal("0"))
+    cr = sum((t.amount for t in txns if t.amount > 0), Decimal("0"))
+    assert dr == Decimal("10069.00")   # "Sub Total : 10,069.00 Dr"
+    assert cr == Decimal("55125.00")   # "55,125.00 Cr"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

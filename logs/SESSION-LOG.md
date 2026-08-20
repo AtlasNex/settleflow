@@ -94,3 +94,21 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   end-to-end `parse_sbi_pdf` on a generated PDF. `hermes verify` ok.
 - **Docs:** SCHEMAS (SBI PDF section), DECISIONS D-21, FEATURE (ATL-72 -> done),
   CONSTRAINTS (#6 note + known-ceiling), HANDOVER, README.
+
+## 2026-08-20 — Session 5 (continued) (Kotak Dr/Cr combined-amount parser)
+
+- **Model:** deepseek-v4-pro.
+- **Did:** continued the bank-coverage push (ATL-80). Sourced a real anonymised Kotak
+  netbanking statement (Apache-2.0, `raptar231` fixture) and found Kotak uses a SINGLE
+  combined amount column with an explicit Dr/Cr marker ("347.00 Dr" = debit,
+  "35,000.00 Cr" = credit) — distinct from the two-column variant A already wired.
+  Added `parse_drcr_statement` + `load_bank_statement_drcr` to `parsers.py`, and made
+  `load_bank_statement` auto-detect the Dr/Cr layout so `bank="kotak"` works for either
+  variant. Version 0.5.0 -> 0.6.0.
+- **Deferred (honest):** PNB's separate Withdrawal/Deposit columns collapse ambiguously
+  in flattened text (same trap as the legacy SBI netbanking layout) — needs
+  coordinate-aware extraction or the raw PDF. Kotak's "bankii" variant B likewise still
+  needs a real sample.
+- **Verified:** self-check 33/33 (Kotak Dr/Cr auto-detect; totals reconcile with the
+  statement's own sub-totals 10,069.00 Dr / 55,125.00 Cr).
+- **Docs:** SCHEMAS (Kotak Dr/Cr note), DECISIONS D-22, FEATURE, HANDOVER.
