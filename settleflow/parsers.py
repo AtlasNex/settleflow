@@ -169,9 +169,12 @@ def load_bank_statement_csv(
     return txns
 
 
+_MONEY_RE = re.compile(r"^\d[\d,]*\.\d{2}$")
+
+
 def _is_money(tok: str) -> bool:
     """True for a money token like '347.00' or '9,653.00' (Indian grouping)."""
-    return bool(re.compile(r"^\d[\d,]*\.\d{2}$").match(tok))
+    return bool(_MONEY_RE.match(tok))
 
 
 # Kotak's netbanking statement (and some other banks) use a SINGLE combined
