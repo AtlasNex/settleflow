@@ -155,3 +155,11 @@ survived because the OSS component layer is genuinely un-owned.
   `dd MMM yyyy`, `dd-MMM-yyyy`, and ISO/datetime-with-time.
 - **Model:** deepseek-v4-pro (build) + deepseek-v4-flash (2 research subagents).
   **Date:** 2026-08-16.
+
+### D-20: Bank statements arrive as PDF too — PDF parser is a separate layer
+- **Why:** Sanjay's SBI statement is a PDF, not CSV. The library currently has no PDF
+  path. PDF extraction is a different trust boundary (layout parsing, password, possible
+  OCR) and must be built against a REAL file (D-7), never a guessed layout. `pypdf` and
+  `pymupdf` are already installed, so no new dependency. Tracked as ATL-72; blocked on
+  Sanjay providing the actual PDF.
+- **Model:** deepseek-v4-pro. **Date:** 2026-08-16.

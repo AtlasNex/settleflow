@@ -50,21 +50,22 @@ python -m uvicorn saas.app:app --host 127.0.0.1 --port 8091
 
 ## What is next
 
-Phase 3 is substantially done. Remaining parser work, in priority order (each still
-needs either a dedicated parser or a real sample file to resolve an ambiguity — see
-`docs/SCHEMAS.md`):
+**Immediate (blocked on Sanjay's file):** his SBI statement is a **PDF**, not CSV. Build
+a PDF statement parser (`parse_sbi_pdf` or generic `parse_bank_pdf`) against his real
+file. `pypdf` + `pymupdf` are already installed. Resolve on the file: password (SBI PDFs
+often locked), text-vs-scanned (OCR), and the table layout. Tracked as ATL-72. Never
+guess the layout (D-7).
 
-1. **Cashfree settlement-recon** — two-section file (14 + 48 cols); write a dedicated
-   two-section parser.
-2. **PhonePe settlement report** — 14 verified fields, but `PaymentType` values and the
-   date format are undocumented; confirm against a real file first.
-3. **Juspay settlement file** — 25 verified columns, but the money unit (paise vs rupees)
-   is unstated; confirm against a real file first.
-4. **Kotak variant B** — the second documented layout; add auto-detect.
+**Then, in priority order** (each still needs a dedicated parser or a real sample —
+see `docs/SCHEMAS.md`):
 
-The single most valuable thing Sanjay can drop in: one real HDFC/SBI statement CSV and
-one real Razorpay recon CSV export, to confirm the units/date variants the public
-sources couldn't fully pin down.
+1. **Cashfree settlement-recon** — two-section file (14 + 48 cols); dedicated parser.
+2. **PhonePe settlement report** — 14 verified fields; confirm `PaymentType`/date format.
+3. **Juspay settlement file** — 25 verified columns; confirm money unit.
+4. **Kotak variant B** — second documented layout; add auto-detect.
+
+The single most valuable thing Sanjay can drop in: his SBI PDF (path + password) and one
+real Razorpay recon CSV export.
 
 ## Gotchas / pitfalls
 

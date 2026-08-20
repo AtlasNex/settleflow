@@ -59,3 +59,17 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
 - **Deferred (honest):** Cashfree recon (two-section file), PhonePe (undocumented
   type/date), Juspay (unstated money unit), PayU (user-configurable columns) — all
   documented in `docs/SCHEMAS.md`, not fabricated.
+
+## 2026-08-16 — Session 4 closeout (PDF parser discovered + queued)
+
+- **Model:** deepseek-v4-pro.
+- **Did:** fixed SBI's native tab-separated ".xls" export (auto-detect delimiter via
+  `csv.Sniffer` in `load_bank_statement_csv`) — committed `e2f16e4`, self-check 28/28,
+  `hermes verify` ok:true.
+- **Discovery:** Sanjay's SBI statement is a **PDF**, not CSV. The library has no PDF
+  path yet. Created **ATL-72** (SBI bank-statement PDF parser). `pypdf` and `pymupdf`
+  are both already installed locally, so no new dependency needed.
+- **Blocking input (needs Sanjay):** his actual SBI PDF — path + password (SBI PDFs are
+  often locked) + whether it is text-based or a scanned image (OCR path).
+- **Next session starts here:** build `parse_*_pdf` against his real file, never guess
+  the layout (D-7).
