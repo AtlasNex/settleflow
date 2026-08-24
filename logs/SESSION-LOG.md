@@ -224,3 +224,44 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   Cashfree/PhonePe/Juspay/PayU+IDFC parsers (real dashboard exports).
 - **Verified:** 42/42 suite; import smoke (ocr exports, no circular import); Dockerfile/
   compose READY; uvicorn /health green. Commit follows.
+
+## 2026-08-25 — Session 12 (live deploy: settleflow.atlasnex.com via systemd + CF tunnel)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** Sanjay: "i already have a domain na. can u use that or what?" — yes, and did.
+  Loaded the cloudflare-vps-deploy pattern (CF Tunnel -> VPS localhost). Probed the VPS
+  (root@148.113.6.63:20065: Ubuntu 24.04.4, Docker 29.7.2, cloudflared). The existing
+  `atlasnex-vps` tunnel already maps trade-ui -> 127.0.0.1:8091, so chose host port **8093**
+  + subdomain **settleflow.atlasnex.com**; set docker-compose.yml to 8093. Shipped context
+  to /opt/settleflow. `docker compose up -d --build` **FAILED** — this LXC has **no
+  AppArmor** (even `--security-opt apparmor=unconfined` fails), so Docker build can't run.
+  PIVOTED to the proven hot-patch: wrote the systemd unit `settleflow.service`
+  (`uvicorn saas.app:app --host 127.0.0.1 --port 8093`, venv /opt/settleflow/.venv),
+  enabled it -> service active, internal /health 200. Created the DNS CNAME
+  `settleflow.atlasnex.com -> 9a8936c6-…cfargotunnel.com` (proxied). Added a local ingress
+  + restarted cloudflared -> external **404**. DIAGNOSED: cloudflared is REMOTE-managed
+  (log "Updated to new configuration ... version=10"; the local config.yml edit was
+  ignored). Fixed via `PUT /accounts/{acct}/cfd_tunnel/{tun}/configurations` to add
+  `settleflow.atlasnex.com -> http://localhost:8093` (plus the CNAME/proxy).
+- **Verified:** internal `curl 127.0.0.1:8093/health` 200; external
+  `https://settleflow.atlasnex.com/health` -> {"status":"ok","version":"0.7.3"} 200;
+  external `/` renders the UI. Re-verified at session end (still 200).
+- **Decisions (D-28):** hot-patch over Docker on this LXC (AppArmor-blocked build);
+  remote-managed CF tunnel -> any ingress change via the API, never local config.yml;
+  port 8093 (8091 is trade-ui's slot), bind 127.0.0.1 only.
+- **Deferred:** SaaS auth/login + landing polish (not requested); Cashfree/PhonePe/Juspay/
+  PayU + IDFC parsers (still need one real dashboard export each).
+- **Committed:** `aef79db` (port 8093), `3a0a818` (docs D-28). Version stays 0.7.3.
+
+## 2026-08-25 — Session 13 (docs closeout: log every session + refresh handover)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** Sanjay: "Do all logs in docs. all the convo logs and all." Compared git log
+  against logs/SESSION-LOG.md — Sessions 1-11 were logged but the **live-deploy** session
+  (aef79db/3a0a818, D-28) was not. Added Session 12 (live deploy). Confirmed D-28 is in
+  docs/DECISIONS.md. Refreshed docs/HANDOVER.md ("Current state" date 2026-08-21 ->
+  2026-08-25; refreshed the stale git-history line). Cleaned the stray temp
+  `settleflow.service` (already deleted) and re-confirmed git clean, tree in sync with
+  origin/master, and the live endpoint still 200.
+- **Verified:** `hermes verify --skip-start --json` green (bootstrap settleflow-0.7.3,
+  test 42/42, source: manifest); `/health` 200. Commit follows.

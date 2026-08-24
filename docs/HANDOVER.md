@@ -17,7 +17,7 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Money docs: `docs/MONETIZATION.md` (deep-research) + `docs/COMMERCIAL.md` (Sidekiq
   licensing) + `funding.json` + `.github/FUNDING.yml`
 
-## Current state (2026-08-21)
+## Current state (2026-08-25)
 
 All phases done; bank + gateway parser coverage is complete for every format
 with a public sample. The library is end-to-end usable via a CLI.
@@ -45,9 +45,9 @@ with a public sample. The library is end-to-end usable via a CLI.
 - **CLI (D-23)**: `python -m settleflow reconcile --settlements X --vendor v
   --bank b --statement Y --out-dir out` -> `tally.csv` + `exceptions.csv`.
 
-Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
-`f2a9b92` relocate+rename, `ca3f592` docs; 2026-08-16 work: `9becf0e` Phases 2-5 +
-`04eceba` verify manifest; Phase-3 maps are the next commit.
+Git history (recent head): `a73c1df` v0.7.3 OCR+Docker, `aef79db` port 8093,
+`3a0a818` D-28 live deploy (HEAD). Earlier: `dd68089` complete end-to-end CLI,
+`d56fdd0` v0.7.2 IST/date/PDF-gating, `12173f1` v0.7.1 Kotak bankii-B, `a73c1df` head.
 
 ## How to run
 
