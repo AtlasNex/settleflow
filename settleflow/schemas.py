@@ -146,6 +146,18 @@ BANK_STATEMENT_MAPS: dict[str, BankColumnMap | None] = {
         date_col="Transaction Date", debit_col="Withdrawal Amt.",
         credit_col="Deposit Amt.", ref_col="Chq./Ref.No.", narration_col="Description",
     ),
+    # Kotak "bankii" variant B — separate Debit amount / Credit amount columns
+    # plus a Dr/Cr flag. Transcribed from the real parser jasimmk/bankii
+    # in_kotak.py (Serial|Transaction date|Value date|Description|Chq / Ref No.|
+    # Debit amount|Credit amount|Balance|Dr/Cr; %d-%m-%Y), verified 2026-08-24
+    # (ATL-90). The Dr/Cr flag is redundant here: only one amount column is
+    # populated per row, load_bank_statement_csv already signs credit=+, debit=-.
+    # Auto-detected in load_bank_statement by the "Debit amount"/"Credit amount"
+    # headers. Parse-from-real-file test is pending a real bankii fixture (D-7).
+    "kotak_bankii": BankColumnMap(
+        date_col="Transaction date", debit_col="Debit amount",
+        credit_col="Credit amount", ref_col="Chq / Ref No.", narration_col="Description",
+    ),
     "idfc": None,
 }
 
@@ -199,6 +211,17 @@ def load_bank_statement(path, bank: str) -> list[Txn]:
         return parse_sbi_statement(raw)
     if bank in TEXT_BANK_PARSERS:
         return TEXT_BANK_PARSERS[bank](raw)
+    # Kotak "bankii" variant B (ATL-90): separate "Debit amount"/"Credit amount"
+    # columns + Dr/Cr flag. Detected by header content (bankii-specific column
+    # names), not the bank key, so "kotak" auto-routes here and "kotak_bankii"
+    # works too. Schema transcribed from the real parser jasimmk/bankii.
+    if "Debit amount" in raw and "Credit amount" in raw:
+        cm = BANK_STATEMENT_MAPS["kotak_bankii"]
+        return load_bank_statement_csv(
+            path,
+            date_col=cm.date_col, debit_col=cm.debit_col, credit_col=cm.credit_col,
+            ref_col=cm.ref_col, narration_col=cm.narration_col,
+        )
     if bank not in BANK_STATEMENT_MAPS:
         raise KeyError(f"unknown bank {bank!r}; register it in BANK_STATEMENT_MAPS")
     cm = BANK_STATEMENT_MAPS[bank]

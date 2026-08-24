@@ -416,6 +416,29 @@ def test_kotak_bank_statement_parse():
     assert txns[1].amount == Decimal("199.00")
 
 
+def test_kotak_bankii_bank_statement_parse():
+    # Kotak "bankii" variant B (ATL-90): separate Debit amount / Credit amount
+    # columns + a Dr/Cr flag, date %d-%m-%Y. Schema transcribed from the real
+    # parser jasimmk/bankii in_kotak.py (Serial|Transaction date|Value date|
+    # Description|Chq / Ref No.|Debit amount|Credit amount|Balance|Dr/Cr), so
+    # this tests parser LOGIC against a verified header — not a guessed schema.
+    # load_bank_statement content-routes it (header "Debit amount"/"Credit
+    # amount"), so the "kotak" key auto-handles a bankii export. Parse-from-realfile
+    # verification is pending a real bankii fixture (D-7).
+    csv = (
+        "Serial,Transaction date,Value date,Description,Chq / Ref No.,Debit amount,Credit amount,Balance,Dr/Cr\n"
+        "1,01-04-2026,01-04-2026,UPI PAYMENT,,99.00,,501.00,DR\n"
+        "2,02-04-2026,02-04-2026,REFUND RECEIVED,,,199.00,700.00,CR\n"
+    )
+    p = _write(Path(tmp_dir()) / "kotak_bankii.csv", csv)
+    txns = load_bank_statement(str(p), "kotak")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("-99.00")  # DR -> debit
+    assert txns[1].amount == Decimal("199.00")  # CR -> credit
+    assert txns[0].utr is None or txns[0].utr == ""
+    assert txns[0].ref == "UPI PAYMENT"
+
+
 def test_icici_bank_statement_parse():
     csv = (
         "S No.,Value Date,Transaction Date,Cheque Number,Transaction Remarks,Withdrawal Amount(INR),Deposit Amount(INR),Balance(INR)\n"

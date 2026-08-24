@@ -80,10 +80,13 @@ the date+debit+credit names (HDFC ~2-3 rows, Axis ~row 20).
 Notes: SBI native download is tab-separated ".xls" with BOM/CRLF and an
 `OPENING BALANCE` row (skipped by the loader). ICICI has no native CSV export
 (Excel/ZIP only); the "CSV" users get is the Excel saved-as-CSV. Kotak variant
-B (bankii) is documented above but not yet wired — auto-detect when a real
-sample lands. PNB/DBS use separate Withdrawal/Deposit columns whose blank cells
-collapse in the extracted text, so the sign is recovered from running-balance
-arithmetic (`parse_bank_text`, D-23), not a two-column map.
+B (bankii) is wired (ATL-90): the two-column map + Dr/Cr flag, transcribed from
+jasimmk/bankii `in_kotak.py`, is auto-detected in `load_bank_statement` by the
+"Debit amount"/"Credit amount" headers. Parse-from-real-file verification is
+pending a real bankii export (D-7). PNB/DBS use separate Withdrawal/Deposit
+columns whose blank cells collapse in the extracted text, so the sign is
+recovered from running-balance arithmetic (`parse_bank_text`, D-23), not a
+two-column map.
 
 Kotak also ships a **combined-amount** netbanking statement:
 `Date, Narration, Chq/Ref No., Withdrawal (Dr) / Deposit (Cr), Balance` — a

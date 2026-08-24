@@ -143,3 +143,25 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   extra"), and flow sections for `extract_pdf_text` / `parse_sbi_statement` / `parse_sbi_pdf`.
 - **Verified:** self-check 38/38; git commit `0d1ad63` (docs-only, 2 files, +70/-9).
 - **Docs:** ARCHITECTURE.md, FLOW.md, SESSION-LOG.md.
+
+## 2026-08-24 — Session 8 (ATL-90: gateway settlement files + Kotak bankii-B)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** Sanjay said the sample file won't open and told me to find it on the full
+  internet. Exhaustive search (vendor docs, GitHub repo+code search, the vetted bank-
+  fixture repos raptar231/jasimmk/bankii, real production reconcilers aravindsiva13 +
+  SaiYadav1818/Karatly) CONCLUSIVELY found NO public sample FILE for Cashfree/PhonePe/
+  Juspay/PayU settlement+recon CSVs or IDFC — they're merchant-private dashboard exports
+  (contain real transaction/PII data). Verified real schemas instead: Kotak bankii-B
+  (transcribed from jasimmk/bankii in_kotak.py), Cashfree orders (13 cols, production
+  parser), PhonePe 14 + Juspay 25 (already in SCHEMAS.md). Per Sanjay's "do A", WIRED
+  Kotak bankii variant B: `kotak_bankii` BankColumnMap + header content auto-detect in
+  load_bank_statement (tokens "Debit amount"/"Credit amount"), so the "kotak" key
+  auto-handles a bankii export; Dr/Cr flag redundant (one amount col per row).
+  Version 0.7.0 -> 0.7.1. Self-check 38 -> 39.
+- **Deferred (honest):** parse-from-real-file test for bankii-B (needs a real Kotak
+  bankii export; D-7 no synthetic); Cashfree/PhonePe/Juspay/PayU settlement+recon
+  parsers (need one real dashboard export each); IDFC; scanned/OCR PDFs; hosted SaaS.
+- **Verified:** 39/39 checks pass; `python -m settleflow` import + version 0.7.1.
+- **Docs:** SCHEMAS (bankii-B wired note), DECISIONS D-24, HANDOVER (bankii-B + gated
+  list), SESSION-LOG.

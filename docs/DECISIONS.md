@@ -223,3 +223,30 @@ survived because the OSS component layer is genuinely un-owned.
   docs); scanned/image-only PDFs (OCR is a separate unbuilt layer); the hosted
   SaaS (later stage). Kotak "bankii" variant B still needs a real sample.
 - **Model:** deepseek-v4-pro. **Date:** 2026-08-21.
+
+### D-24: Gateway settlement files are merchant-private; verified schemas + Kotak bankii-B wired
+- **Why:** ATL-90 — "search the full internet and find the sample files" (Sanjay,
+  24.08.26). Exhaustive public search (vendor docs, GitHub repo+code search, the
+  vetted bank-fixture repos raptar231 and jasimmk/bankii, and real production
+  reconcilers aravindsiva13 + SaiYadav1818/Karatly) CONCLUSIVELY found NO public
+  sample FILE for the Cashfree/PhonePe/Juspay/PayU settlement or recon CSVs, nor
+  IDFC. Every vendor report is generated from an authenticated Merchant Dashboard
+  (and contains real transaction/PII data), so these files are never published
+  the way anonymised bank-statement text is. D-19's "get the files yourself"
+  precedent therefore does NOT extend to them; the gate is real, not a search gap.
+- **Verified from real sources (not guessed, D-7):** Kotak "bankii" variant B
+  schema transcribed from the production parser `jasimmk/bankii/in_kotak.py`
+  (`Serial | Transaction date | Value date | Description | Chq / Ref No. |
+  Debit amount | Credit amount | Balance | Dr/Cr`, `%d-%m-%Y`); Cashfree orders
+  report (13 cols, from a production `CashfreeSettlementCsvParser`); PhonePe 14
+  fields + Juspay 25 cols (already captured in SCHEMAS.md from official docs).
+- **Wired:** Kotak bankii-B as a `BankColumnMap` + content auto-detect in
+  `load_bank_statement` (header tokens "Debit amount"/"Credit amount"), so the
+  existing `kotak` key auto-handles a bankii export. The Dr/Cr flag is redundant
+  (only one amount column populated per row). Self-check 38 -> 39.
+- **Deferred (honest):** parse-from-real-file verification for bankii-B (needs a
+  real Kotak bankii CSV export; D-7 no synthetic fixtures); Cashfree/PhonePe/
+  Juspay/PayU settlement+recon parsers (need a real dashboard export from any
+  merchant account); IDFC; scanned/OCR PDFs; hosted SaaS. UNBLOCK = one real
+  dashboard export per gateway (see the ATL-90 comment for the exact list).
+- **Model:** deepseek-v4-flash-vision-exp (build + search). **Date:** 2026-08-24.

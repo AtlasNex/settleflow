@@ -8,7 +8,7 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Project root: `E:/Sanjay Files/StartUp/open source/settleflow`
 - Package: `settleflow/` (models.py, matching.py, parsers.py, exports.py,
   exceptions.py, schemas.py, pdf.py, `__main__.py` = CLI)
-- Tests: `tests/test_matching.py` (assert-based self-check, 38 checks) +
+- Tests: `tests/test_matching.py` (assert-based self-check, 39 checks) +
   `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md)
 - SaaS: `saas/app.py` + `saas/templates/` + `saas/requirements.txt` + sample files
 - Docs: `docs/` (architecture, constraints, flow, decisions, bug, feature, rollback,
@@ -25,10 +25,12 @@ with a public sample. The library is end-to-end usable via a CLI.
 - **Level 1**: `Txn`/`Match`/`ReconResult` + two-pass match + `match_settlements`.
 - **Level 2**: `ReconLine`/`BatchRecon`/`OrderMatch` + `group_batches` + `match_orders`
   + `parse_razorpay_recon` (verified 24-param schema, fails closed on unknown fields).
-- **Phase 3 (banks)**: HDFC/SBI/ICICI/Axis/Kotak (two-column CSV) + Kotak Dr/Cr
-  (D-22) + PNB/DBS (running-balance, D-23). All headers + sources in
-  `docs/SCHEMAS.md`. NOT wired (no public sample): Cashfree/PhonePe/Juspay/PayU
-  settlement files, Kotak "bankii" variant B.
+- **Phase 3 (banks)**: HDFC/SBI/ICICI/Axis/Kotak (variant A two-column CSV) + Kotak
+  Dr/Cr (D-22) + Kotak "bankii" variant B (D-24, wired 2026-08-24; schema transcribed
+  from jasimmk/bankii in_kotak.py, auto-detected by header) + PNB/DBS (running-balance,
+  D-23). All headers + sources in `docs/SCHEMAS.md`. NOT wired (no public sample):
+  Cashfree/PhonePe/Juspay/PayU settlement + recon files (confirmed merchant-private
+  dashboard exports, D-24), IDFC.
 - **PDF (D-21 + D-23)**: `settleflow/pdf.py` — `extract_pdf_text` (lazy pymupdf,
   password + scanned detection), `parse_sbi_pdf`, and `parse_sbi_statement` which
   auto-dispatches SBI **YONO / netbanking / credit-card** layouts. pymupdf is an
@@ -68,18 +70,22 @@ parse_sbi_pdf("statement.pdf")           # SBI YONO / netbanking / credit card
 ## What is next
 
 **Parser coverage is complete** for every format with a public sample. The
-remaining items are all gated on real files or later-stage infra:
+remaining items are gated on real files that D-24 definitively confirmed are
+NOT publicly sampleable (they are merchant-private dashboard exports):
 
-1. **Cashfree / PhonePe / Juspay settlement files** — schemas are captured in
-   `docs/SCHEMAS.md` from official docs, but there is no public sample to build
-   against (D-7). A real export from any of these would unlock the parser.
+1. **Cashfree / PhonePe / Juspay settlement + recon files** — schemas are captured in
+   `docs/SCHEMAS.md` from official docs, and I verified the real field sets against
+   production parsers (D-24), but there is no public sample file to build/test against
+   (D-7). A real export from any of these dashboards unlocks the parser.
 2. **Scanned/image-only PDFs** — needs an OCR layer (a separate, unbuilt piece).
-3. **Kotak "bankii" variant B** — documented but no real sample.
+3. **IDFC bank statement** — no verified schema source found yet.
 4. **Hosted SaaS** — auth, multi-user, deployment (later stage).
 
-The single most valuable thing Sanjay can drop in: one real **Razorpay recon CSV
-export** and a **Cashfree/PhonePe settlement file**, plus his actual SBI PDF to
-validate the YONO/netbanking/credit-card parsers against his real file.
+The single most valuable thing Sanjay can drop in: **one real settlement-recon CSV
+export from any Cashfree / PhonePe / Juspay merchant dashboard he can access**, plus
+his actual SBI PDF to validate the YONO/netbanking/credit-card parsers. (Kotak
+"bankii" variant B is now wired — D-24; it just needs a real Kotak bankii export to
+fully verify, but the column map and content auto-detect are in and tested.)
 
 ## Gotchas / pitfalls
 
