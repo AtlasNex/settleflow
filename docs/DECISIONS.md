@@ -318,3 +318,26 @@ survived because the OSS component layer is genuinely un-owned.
   Tunnel/port), to be confirmed with Sanjay.
 - **Self-check:** 41 -> 42 (OCR test, guarded to skip if tesseract/pymupdf absent).
   Version 0.7.2 -> 0.7.3. **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.
+
+### D-28: SettleFlow SaaS deployed live at settleflow.atlasnex.com
+- **Why:** Sanjay said he has a domain — "can u use that or what?" (yes). And gave the go.
+  Hosted the thin SaaS (FastAPI reconcile/expose/export) publicly.
+- **How (pivots discovered):** (1) This VPS is a Proxmox **LXC → Docker build FAILS** with an
+  AppArmor error (`unable to apply apparmor profile`), even with `--security-opt
+  apparmor=unconfined` — the existing images were built elsewhere; the proven pattern here
+  is **hot-patch / run directly** (memory: "NexOS deploy=hot-patch not build"). So instead
+  of Docker, I ran the SaaS as a **systemd service** (`/etc/systemd/system/settleflow.service`,
+  venv at /opt/settleflow/.venv, `uvicorn saas.app:app --host 127.0.0.1 --port 8093`).
+  (2) The tunnel is **remotely-managed** (Cloudflare pushes the ingress config, version=10—
+  my local /etc/cloudflared/config.yml edit was IGNORED). So the public hostname had to be
+  added via the Cloudflare API: `PUT /accounts/{acct}/cfd_tunnel/{tun}/configurations`
+  (adds `settleflow.atlasnex.com -> http://localhost:8093`), plus a **DNS CNAME**
+  `settleflow.atlasnex.com -> 9a8936c6-…cfargotunnel.com` (proxied).
+- **Whys on keys:** port **8093** (8091 is the trade-ui tunnel slot, 8092/8093 free);
+  bind 127.0.0.1 for the tunnel to reach it, never expose the port directly.
+- **Verified:** internal `curl http://127.0.0.1:8093/health` -> 200; external
+  `https://settleflow.atlasnex.com/health` -> {"status":"ok","version":"0.7.3"} 200;
+  external `/` renders the UI. cloudflared log shows version=11 config with settleflow.
+- **Deployment is host-run (not containerized) on this box**; the Dockerfile/compose remain
+  for hosts where AppArmor/LXC is not a Docker-build blocker.
+- **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.

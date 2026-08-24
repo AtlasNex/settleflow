@@ -36,7 +36,9 @@ with a public sample. The library is end-to-end usable via a CLI.
   auto-dispatches SBI **YONO / netbanking / credit-card** layouts. pymupdf is an
   optional `[pdf]` extra; core stays stdlib-only.
 - **Phase 4**: `saas/app.py` — FastAPI reconcile/expose/export loop, sqlite3 storage,
-  Tally + GST + TDS-1035 CSV exports. Runs locally, not hosted.
+  Tally + GST + TDS-1035 CSV exports. **LIVE** at https://settleflow.atlasnex.com (host-run
+  systemd service, port 8093, Cloudflare Tunnel; not Docker — this LXC blocks Docker build
+  via AppArmor, D-28).
 - **Phase 5**: `exceptions.py` — `classify()` (5 rule categories), `build_llm_prompt()`,
   and `triage_exceptions(exc, call_llm)` (provider-agnostic LLM hook; core still
   makes no network call).
