@@ -326,6 +326,19 @@ def extract_pdf_text(path: str | Path) -> str:
     return text
 
 
-def parse_sbi_pdf(path: str | Path) -> list[Txn]:
-    """Extract the text of an SBI statement PDF and parse its transactions."""
-    return parse_sbi_statement(extract_pdf_text(path))
+def parse_sbi_pdf(path: str | Path, *, ocr: bool = False) -> list[Txn]:
+    """Extract the text of an SBI statement PDF and parse its transactions.
+
+    By default reads the native text layer. For a SCANNED (image-only) PDF,
+    `extract_pdf_text` raises `PdfScannedError`; set `ocr=True` to fall back to
+    OCR (settleflow.ocr, best-effort: it recovers a text layer, not perfect
+    columns). Requires `pip install 'settleflow[ocr]'`.
+    """
+    try:
+        return parse_sbi_statement(extract_pdf_text(path))
+    except PdfScannedError:
+        if not ocr:
+            raise
+        from .ocr import parse_sbi_scanned_pdf  # lazy: avoid module-load cycle
+
+        return parse_sbi_scanned_pdf(path)

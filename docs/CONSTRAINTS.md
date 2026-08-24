@@ -54,5 +54,5 @@ paired with its reason (full reasoning in `docs/DECISIONS.md`).
   `match_orders`).
 - PDF bank statements: the modern SBI YONO, the legacy netbanking, and the
   credit-card layouts are all parsed (`settleflow/pdf.py`, D-21/D-23). Still
-  deferred: scanned/image-only PDFs (`PdfScannedError`; OCR is a separate
-  unbuilt layer).
+  deferred: scanned/image-only PDFs (`PdfScannedError`; handled via the optional `[ocr]`
+  extra — Tesseract, D-27 — when installed, the native parser runs on the recovered text).

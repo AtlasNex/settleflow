@@ -23,7 +23,7 @@ from .pdf import parse_sbi_pdf
 from .schemas import load_bank_statement, load_settlement_csv
 
 
-def _load_statement(path: str, bank: str):
+def _load_statement(path: str, bank: str, ocr: bool = False):
     p = Path(path)
     if p.suffix.lower() == ".pdf":
         if bank != "sbi":
@@ -32,7 +32,7 @@ def _load_statement(path: str, bank: str):
                 "only handles SBI (YONO/netbanking/credit-card). Export the statement "
                 "as CSV for other banks."
             )
-        return parse_sbi_pdf(p)
+        return parse_sbi_pdf(p, ocr=ocr)
     return load_bank_statement(path, bank)
 
 
@@ -52,11 +52,13 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("--statement", required=True, help="bank statement CSV/text/PDF")
     rec.add_argument("--out-dir", default=".", help="output directory")
     rec.add_argument("--as-of", help="statement date (YYYY-MM-DD) for the stale-settlement flag")
+    rec.add_argument("--ocr", action="store_true",
+                     help="OCR a scanned (image-only) SBI statement PDF (needs 'settleflow[ocr]')")
 
     args = ap.parse_args(argv)
 
     settlements = load_settlement_csv(args.settlements, args.vendor)
-    bank = _load_statement(args.statement, args.bank)
+    bank = _load_statement(args.statement, args.bank, ocr=args.ocr)
     result = match(settlements, bank)
 
     as_of = date.fromisoformat(args.as_of) if args.as_of else None

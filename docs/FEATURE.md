@@ -29,7 +29,7 @@ _(none — every tracked item is either done below or deferred with a reason in 
 
 | # | Feature | Notes |
 |---|---|---|
-| 15 | Scanned SBI PDFs (OCR) | deferred — `PdfScannedError`; OCR is a separate unbuilt layer |
+| 15 | Scanned SBI PDFs (OCR) | built (D-27) — `settleflow[ocr]` (Tesseract) recovers a text layer, fed to the native parser; best-effort on noisy scans |
 | 16 | Cashfree settlement-recon (two-section file) | deferred — no public sample; schema in `docs/SCHEMAS.md` |
 | 17 | PhonePe settlement report | deferred — no public sample; confirm `PaymentType`/date format |
 | 18 | Juspay settlement file | deferred — no public sample; confirm money unit |

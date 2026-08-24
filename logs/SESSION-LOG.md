@@ -205,3 +205,22 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   exports); OCR scanned PDFs; hosted SaaS deployment.
 - **Verified:** 41/41 suite; both D-25 stress harnesses were already green; hermes verify
   --skip-start green (0.7.2 wheel). Commit follows.
+
+## 2026-08-24 — Session 11 (OCR via Tesseract + SaaS deployable)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** Sanjay challenged the "OCR = separate build / SaaS = not a library fix"
+  deferrals and corrected me that Tesseract is already installed (C:/Program Files/
+  Tesseract-OCR/tesseract.exe, not on bash PATH; S1 used it). PIVOTED off a custom
+  RapidOCR+parser approach (uninstalled rapidocr_onnxruntime/onnxruntime/opencv/pyclipper/
+  flatbuffers; removed parse_ocr_statement). Built OCR on Tesseract via subprocess: new
+  settleflow/ocr.py (ocr_pdf_text, parse_sbi_scanned_pdf, OcrUnavailableError, OcrError,
+  optional [ocr] extra = pymupdf), parse_sbi_pdf(path, ocr=True) auto-fallback, CLI --ocr.
+  Verified: scanned PDF -> PdfScannedError -> tesseract -> native parse (2 rows); CLI
+  --ocr reconcile 2/2 matched. SaaS: added Dockerfile + docker-compose.yml (127.0.0.1:8091)
+  + .dockerignore; booted locally, /health 200 {"status":"ok","version":"0.7.3"} (fixed
+  stale hardcoded "0.3.0"). Version 0.7.2 -> 0.7.3, self-check 41 -> 42.
+- **Deferred:** live VPS host deploy (needs a confirmed target + Cloudflare Tunnel/port);
+  Cashfree/PhonePe/Juspay/PayU+IDFC parsers (real dashboard exports).
+- **Verified:** 42/42 suite; import smoke (ocr exports, no circular import); Dockerfile/
+  compose READY; uvicorn /health green. Commit follows.

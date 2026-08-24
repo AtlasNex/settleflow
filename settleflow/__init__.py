@@ -46,6 +46,12 @@ from .pdf import (
     parse_sbi_pdf,
     parse_sbi_statement,
 )
+from .ocr import (
+    OcrError,
+    OcrUnavailableError,
+    ocr_pdf_text,
+    parse_sbi_scanned_pdf,
+)
 from .schemas import (
     API_PARSERS,
     BANK_STATEMENT_MAPS,
@@ -59,7 +65,7 @@ from .schemas import (
     load_vendor_recon_csv,
 )
 
-__version__ = "0.7.2"
+__version__ = "0.7.3"
 
 __all__ = [
     "BatchRecon",
@@ -107,6 +113,10 @@ __all__ = [
     "parse_sbi_statement",
     "parse_sbi_credit_card",
     "parse_sbi_netbanking",
+    "OcrError",
+    "OcrUnavailableError",
+    "ocr_pdf_text",
+    "parse_sbi_scanned_pdf",
     "API_PARSERS",
     "BANK_STATEMENT_MAPS",
     "RECON_CSV_MAPS",

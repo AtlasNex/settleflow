@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from settleflow import __version__ as settleflow_version
 from settleflow import (  # noqa: E402
     Txn,
     classify,
@@ -41,7 +42,7 @@ BASE = Path(__file__).resolve().parent
 DB_PATH = BASE / "settleflow.db"
 TEMPLATES = Jinja2Templates(directory=str(BASE / "templates"))
 
-app = FastAPI(title="SettleFlow", version="0.3.0")
+app = FastAPI(title="SettleFlow", version=settleflow_version)
 
 
 # ---------------------------------------------------------------------------
@@ -221,4 +222,4 @@ def run_tds1035_export(run_id: int):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.3.0"}
+    return {"status": "ok", "version": settleflow_version}

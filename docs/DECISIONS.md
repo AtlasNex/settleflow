@@ -295,3 +295,26 @@ survived because the OSS component layer is genuinely un-owned.
   than under-report genuine duplicates).
 - **Self-check:** 39 -> 41 (2 new: IST epoch + two-digit month name; CLI PDF gating).
   Version 0.7.1 -> 0.7.2. **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.
+
+### D-27: OCR for scanned SBI PDFs (Tesseract) + SaaS deploy-ready
+- **Why:** Sanjay (24.08.26): "OCR scanned PDFs — needs an OCR layer" and "Hosted SaaS —
+  needs deployment" — challenged the earlier deferrals as things I should just do. Also
+  corrected me: Tesseract is ALREADY installed (not on bash PATH; it's at
+  C:/Program Files/Tesseract-OCR/tesseract.exe) — so use it, don't invent a new OCR stack.
+- **OCR (settleflow/ocr.py, optional [ocr] extra):** rasterises each page with pymupdf and
+  runs the Tesseract CLI via subprocess (--psm 6). The recovered text feeds the existing
+  `parse_sbi_statement` dispatcher. On a clean scan Tesseract preserves the statement's
+  columns/header, so the native parser works (verified: 2 rows recovered). Added
+  `ocr_pdf_text`, `parse_sbi_scanned_pdf`, `OcrUnavailableError`, `OcrError`;
+  `parse_sbi_pdf(path, ocr=True)` auto-falls back on `PdfScannedError`; CLI `--ocr` flag.
+  Honest ceiling: OCR recovers a text layer, not perfect columns — a noisy scan can merge
+  columns and the parser raises `PdfLayoutError` rather than guessing. The `[ocr]` extra is
+  just pymupdf (Tesseract is a system binary, invoked via CLI, no pip OCR package).
+- **SaaS deploy-ready:** added `Dockerfile` (python:3.11-slim, install `.[saas]`, run
+  uvicorn) + `docker-compose.yml` (binds 127.0.0.1:8091:8000, container_name settleflow) +
+  `.dockerignore`. Verified the app boots locally and `/health` returns
+  {"status":"ok","version":<library version>} (fixed a stale hardcoded "0.3.0" to use
+  `settleflow.__version__`). Actual live host deploy is a separate infra step (Cloudflare
+  Tunnel/port), to be confirmed with Sanjay.
+- **Self-check:** 41 -> 42 (OCR test, guarded to skip if tesseract/pymupdf absent).
+  Version 0.7.2 -> 0.7.3. **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.

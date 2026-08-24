@@ -1,0 +1,11 @@
+# Thin FastAPI SaaS for SettleFlow. Bind to localhost only and expose via
+# Cloudflare Tunnel (or a reverse proxy) — never expose 8091 directly.
+services:
+  settleflow-saas:
+    build: .
+    container_name: settleflow
+    ports:
+      - "127.0.0.1:8091:8000"
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

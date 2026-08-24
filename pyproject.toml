@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "settleflow"
-version = "0.7.2"
+version = "0.7.3"
 description = "Open-source UPI/NPCI settlement reconciliation library for India"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,6 +19,9 @@ saas = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "jinja2>=3.1", "python-mult
 # Optional PDF bank-statement extraction (settleflow.pdf). The core stays
 # stdlib-only; pymupdf is imported lazily only when a PDF is parsed.
 pdf = ["pymupdf>=1.24"]
+# Optional OCR for SCANNED (image-only) PDFs (settleflow.ocr). pymupdf rasterises
+# pages; the Tesseract engine is invoked via its CLI (system binary, not pip).
+ocr = ["pymupdf>=1.24"]
 
 [tool.setuptools.packages.find]
 include = ["settleflow*"]

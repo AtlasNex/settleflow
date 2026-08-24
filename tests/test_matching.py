@@ -739,6 +739,36 @@ def test_cli_pdf_gating_non_sbi():
         assert "only handles SBI" in str(e)
 
 
+def test_ocr_scanned_sbi_pdf():
+    # OCR is an optional extra; skip cleanly when tesseract or pymupdf is absent
+    # so the suite stays green everywhere, but actually exercise it here.
+    import shutil
+    try:
+        import pymupdf
+    except ImportError:
+        print("      (ocr) pymupdf absent — skipped")
+        return
+    tess_raw = shutil.which("tesseract")
+    tess = Path(tess_raw) if tess_raw else Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+    if not tess.exists():
+        print("      (ocr) tesseract absent — skipped")
+        return
+    from settleflow import parse_sbi_scanned_pdf
+    d = tempfile.mkdtemp()
+    body = ("Transaction Reference  Ref.No./Chq.No.  Credit  Debit  Balance\n"
+            "01-04-2026  UPI PAYMENT  500.00  -  1000.00\n")
+    src = pymupdf.open(); pg = src.new_page(width=800, height=600); y = 60
+    for ln in body.splitlines():
+        pg.insert_text((60, y), ln, fontsize=10); y += 22
+    png = Path(d) / "p.png"; pg.get_pixmap(dpi=300).save(str(png)); src.close()
+    out = pymupdf.open(); op = out.new_page(width=800, height=600)
+    op.insert_image(op.rect, filename=str(png))
+    scan = Path(d) / "scanned.pdf"; out.save(str(scan)); out.close()
+    txns = parse_sbi_scanned_pdf(str(scan))
+    assert any(t.amount == Decimal("500.00") and t.txn_date == date(2026, 4, 1) for t in txns), \
+        f"OCR parse got {[(str(t.amount), t.txn_date) for t in txns]}"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

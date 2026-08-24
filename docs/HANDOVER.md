@@ -7,8 +7,8 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 - Project root: `E:/Sanjay Files/StartUp/open source/settleflow`
 - Package: `settleflow/` (models.py, matching.py, parsers.py, exports.py,
-  exceptions.py, schemas.py, pdf.py, `__main__.py` = CLI)
-- Tests: `tests/test_matching.py` (assert-based self-check, 41 checks) +
+  exceptions.py, schemas.py, pdf.py, ocr.py, `__main__.py` = CLI)
+- Tests: `tests/test_matching.py` (assert-based self-check, 42 checks) +
   `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md)
 - SaaS: `saas/app.py` + `saas/templates/` + `saas/requirements.txt` + sample files
 - Docs: `docs/` (architecture, constraints, flow, decisions, bug, feature, rollback,
@@ -51,7 +51,7 @@ Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py            # self-check, 41 checks
+python tests/test_matching.py            # self-check, 42 checks
 
 # CLI — one-command reconciliation:
 python -m settleflow reconcile \
@@ -77,15 +77,16 @@ NOT publicly sampleable (they are merchant-private dashboard exports):
    `docs/SCHEMAS.md` from official docs, and I verified the real field sets against
    production parsers (D-24), but there is no public sample file to build/test against
    (D-7). A real export from any of these dashboards unlocks the parser.
-2. **Scanned/image-only PDFs** — needs an OCR layer (a separate, unbuilt piece).
-3. **IDFC bank statement** — no verified schema source found yet.
-4. **Hosted SaaS** — auth, multi-user, deployment (later stage).
+2. **IDFC bank statement** — no verified schema source found yet.
+3. **Live SaaS host deploy** — the app is deploy-ready (`Dockerfile` + `docker-compose.yml`,
+   binds 127.0.0.1:8091; `/health` verified 200). The actual VPS/Cloudflare-Tunnel push is
+   a separate infra step to confirm with Sanjay.
 
 The single most valuable thing Sanjay can drop in: **one real settlement-recon CSV
 export from any Cashfree / PhonePe / Juspay merchant dashboard he can access**, plus
 his actual SBI PDF to validate the YONO/netbanking/credit-card parsers. (Kotak
-"bankii" variant B is now wired — D-24; it just needs a real Kotak bankii export to
-fully verify, but the column map and content auto-detect are in and tested.)
+"bankii" variant B is wired — D-24. Scanned SBI PDFs are handled via the `[ocr]`
+extra — D-27 — using the already-installed Tesseract.)
 
 ## Gotchas / pitfalls
 
