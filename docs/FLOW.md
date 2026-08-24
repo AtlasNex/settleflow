@@ -14,17 +14,23 @@ settleflow/__init__.py
   │                        parse_razorpay_settlements, parse_razorpay_recon,
   │                        load_razorpay_recon_json, load_recon_csv
   ├── from .exports     import export_tally_csv, export_gst_worksheet, export_tds_1035
-  ├── from .exceptions  import Exception, classify, build_llm_prompt
+  ├── from .exceptions  import Exception, classify, build_llm_prompt, triage_exceptions
+  ├── from .pdf         import PdfEncryptedError, PdfLayoutError, PdfScannedError,
+  │                          extract_pdf_text, parse_sbi_pdf, parse_sbi_statement,
+  │                          parse_sbi_credit_card, parse_sbi_netbanking
   └── from .schemas     import ColumnMap, ReconColumnMap, load_settlement_csv,
                           load_bank_statement, load_vendor_recon_csv, *_MAPS
 
 settleflow/matching.py  -> from .models import (…)
 settleflow/parsers.py   -> from .models import ReconLine, Settlement, Txn
 settleflow/exports.py   -> from .matching import group_batches
+settleflow/pdf.py       -> from .models import Txn; from .parsers import parse_date
 settleflow/schemas.py   -> from .parsers import load_csv, load_recon_csv
 ```
 
-No circular imports. `models.py` imports nothing from the package.
+No circular imports. `models.py` imports nothing from the package. `pdf.py` imports only
+from `.models` and `.parsers`, never from `__init__`, and pulls `pymupdf` lazily inside
+`extract_pdf_text` so `import settleflow` stays stdlib-only.
 
 ## `match(settlements, bank) -> ReconResult`
 
@@ -86,6 +92,32 @@ No circular imports. `models.py` imports nothing from the package.
 3. Money (`debit/credit/amount/fee/tax`) is paise -> rupees via `_paise`; `created_at`/
    `settled_at` are epoch -> UTC date (settled_at may be null).
 4. Build `ReconLine` and append.
+
+## `extract_pdf_text(path) -> str` (optional `[pdf]` extra)
+
+1. `import pymupdf` lazily; if not installed raise `ImportError("pip install
+   'settleflow[pdf]'")`.
+2. Open the document. If `doc.needs_pass`, raise `PdfEncryptedError`.
+3. Join `page.get_text()` across all pages. If the result is blank (image-only),
+   raise `PdfScannedError`.
+
+## `parse_sbi_statement(text) -> list[Txn]`
+
+Auto-dispatch on the statement's header (D-23):
+
+1. `"CREDIT CARD STATEMENT"` / `"AMOUNT (RS.)"` -> `parse_sbi_credit_card` (regex per line:
+   `Date | Description | Amount (Rs.)`, `Cr` marker / negative amount => credit).
+2. `"TXN DATE"` + `"VALUE"` + `"BALANCE"` -> `parse_sbi_netbanking` (wrapped day/month/year
+   across lines; sign recovered from narration heuristics like `BY UPI` / `TO UPI`).
+3. otherwise, require a header with `"Transaction Reference"` + `"Balance"` (YONO layout),
+   else raise `PdfLayoutError`. The YONO state machine tracks `cur_date` and accumulated
+   `cur_narration`; a line ending in a money tail (`_tail`: ref / credit / debit / balance,
+   one of credit|debit a `-`) is emitted as a `Txn`; a date-only line opens a new
+   transaction; any other line extends the narration.
+
+## `parse_sbi_pdf(path) -> list[Txn]`
+
+One call: `parse_sbi_statement(extract_pdf_text(path))`.
 
 ## `classify(result, as_of, stale_after_days) -> list[Exception]`
 

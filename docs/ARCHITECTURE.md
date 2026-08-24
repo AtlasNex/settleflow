@@ -16,6 +16,8 @@ settleflow/
 │   │                       #   parse_razorpay_recon(), load_recon_csv(), parse_date/amount
 │   ├── exports.py          # export_tally_csv(), export_gst_worksheet(), export_tds_1035()
 │   ├── exceptions.py       # classify(), build_llm_prompt(), Exception
+│   ├── pdf.py              # optional [pdf] extra (pymupdf): extract_pdf_text(),
+│   │                       #   parse_sbi_statement() -> parse_sbi_pdf() (YONO/netbanking/credit-card)
 │   └── schemas.py          # ColumnMap, BankColumnMap, ReconColumnMap, *_MAPS, load_* helpers
 ├── saas/
 │   ├── app.py              # FastAPI: /reconcile, /runs, /export/*, /health
@@ -70,6 +72,30 @@ payment via `payment_id`, sets `adjustment` lines aside for review, and falls ba
 - `load_razorpay_recon_json(path)` / `load_recon_csv(path, **explicit columns)`.
 - `parse_date`, `parse_amount` are tolerant string parsers.
 
+## PDF layer (pdf.py) — optional extra
+
+A **separate trust boundary** (D-20): the core stays stdlib-only, so PDF support is
+`pip install "settleflow[pdf]"` (pulls `pymupdf`), imported lazily so `import settleflow`
+never requires it. Entry points:
+
+- `extract_pdf_text(path)` — pull the text layer of a PDF, raising a specific error for
+  a **password-locked** (`PdfEncryptedError`) or **scanned/image-only** (`PdfScannedError`)
+  file. `PdfLayoutError` covers a recognised-but-unsupported layout.
+- `parse_sbi_statement(text)` — auto-dispatches an SBI statement text to one of three
+  layouts (D-23): modern **YONO / e-statement** (4-column money tail, rows may wrap),
+  legacy **netbanking** (`Txn Date | Value Date | Description | Ref No. | Debit | Credit |
+  Balance`), and **credit-card** (`Date | Description | Amount (Rs.)`, `Cr` marker).
+  Credit -> positive amount, debit -> negative; narration -> `Txn.ref`, reference number ->
+  `Txn.utr`.
+- `parse_sbi_pdf(path)` — `parse_sbi_statement(extract_pdf_text(path))` in one call.
+
+The YONO parser reconstructs each transaction from the **trailing money columns**
+(`ref / credit / debit / balance`), never from a guessed column width, because a long
+narration wraps onto several lines in the extracted text. Verified against real
+anonymised SBI statements (`tests/fixtures/sbi/`, Apache-2.0). **Not handled (raise)**
+rather than half-parsed: legacy netbanking via PDF (use the CSV export), scanned PDFs
+(needs OCR — a separate, unbuilt layer), and encrypted PDFs (decrypt externally).
+
 ## Schema registry (schemas.py)
 
 Vendor/bank formats are **column-map data**, not code. The registry ships three maps:
@@ -100,12 +126,14 @@ sqlite3, and serves generated CSVs. Deliberately thin: no ORM, no auth, no user 
 ## Data flow
 
 ```
-CSV / JSON
-   │  load_csv / parse_razorpay_settlements / parse_razorpay_recon
-   ▼
-list[Txn] | list[Settlement] | list[ReconLine]
-   │  match_settlements / group_batches(+match) / match_orders
-   ▼
+CSV / JSON                                    PDF (optional [pdf])
+   │  load_csv / parse_razorpay_settlements /     │  extract_pdf_text(path)
+   │  parse_razorpay_recon                        │  parse_sbi_pdf / parse_sbi_statement
+   ▼                                              ▼
+list[Txn] | list[Settlement] | list[ReconLine]   list[Txn]
+   └──────────────┬────────────────────────────────┘
+                  │  match_settlements / group_batches(+match) / match_orders
+                  ▼
 ReconResult / OrderReconResult  ── classify() ──► list[Exception]
    │
    └─► export_tally_csv / export_gst_worksheet / export_tds_1035
@@ -124,6 +152,7 @@ ReconResult / OrderReconResult  ── classify() ──► list[Exception]
 
 - **Decimal everywhere**, never `float`, for any amount.
 - **Deterministic**: no reliance on dict iteration order in the output.
-- **Zero runtime dependencies** in the library: stdlib only (SaaS may use FastAPI).
+- **Zero runtime dependencies** in the library core: stdlib only (SaaS may use FastAPI;
+  `pdf.py` is an optional `[pdf]` extra pulling `pymupdf`, never imported at package load).
 - Money in the model is **rupees**; unit conversion lives only in parsers.
 - **Fail closed** on unknown vendor data: raise, never silently coerce or drop.
