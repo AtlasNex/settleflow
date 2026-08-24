@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -14,6 +14,7 @@ _DATE_FORMATS = (
     "%Y-%m-%d", "%Y/%m/%d",      # ISO / machine
     "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",  # Indian numeric (4-digit year)
     "%d %b %Y", "%d %B %Y", "%d-%b-%Y",  # month-name (SBI "1 Jul 2026", ICICI "01-Jul-2024")
+    "%d-%b-%y",  # two-digit-year month-name (e.g. "01-Jul-25")
 )
 
 # Two-digit-year Indian dates ("01/07/26", "1-7-26"). Handled explicitly so that
@@ -415,8 +416,16 @@ def _paise(value) -> Decimal:
     return Decimal(value) / Decimal("100")
 
 
+# Razorpay timestamps are Unix epoch seconds in UTC. Indian bank statements are
+# IST, so convert to IST (+05:30) to align the (amount, date) fallback date with
+# the statement's calendar date — a UTC date was one day off for transactions
+# within ~05:30 of midnight UTC (D-26).
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def _epoch_date(value) -> date:
-    return datetime.fromtimestamp(int(value), tz=timezone.utc).date()
+    """Convert a Unix epoch (UTC) to an IST calendar date."""
+    return datetime.fromtimestamp(int(value), tz=_IST).date()
 
 
 def parse_razorpay_settlements(data: dict) -> list[Settlement]:

@@ -276,3 +276,22 @@ survived because the OSS component layer is genuinely un-owned.
   deliberate call, not a silent change.
 - **Self-check:** 39 -> still 39 (no regression); both stress harnesses green.
 - **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.
+
+### D-26: Fix the remaining found gaps — IST epoch, date format, CLI PDF gating
+- **Why:** Sanjay: "fix all, complete all" after the D-25 stress test's gap report.
+- **(1) `_epoch_date` now returns the IST (+05:30) date.** Razorpay's epoch is UTC;
+  Indian bank statements are IST. The UTC date was one calendar day behind IST for any
+  transaction within ~05:30 of midnight UTC, which skewed the (amount, date) fallback
+  (the primary UTR match was unaffected). Now aligns with the statement's IST date.
+- **(2) Date parser accepts `%d-%b-%y`** (e.g. "01-Jul-25") — added after `%d-%b-%Y` so
+  a 4-digit year still matches first; no ambiguity.
+- **(3) CLI `.pdf` gating:** `--bank` != sbi with a .pdf statement now raises a clear
+  error ("PDF parser only handles SBI") instead of running the SBI parser and throwing a
+  confusing SBI-layout error.
+- **Deliberately KEPT (not bugs):** `_is_money`'s exactly-2-decimals requirement — widening
+  it to accept integers would let a numeric reference (e.g. YONO "500") be misread as a
+  money amount and break real statements; it's a disambiguator, not a bug. `classify()`
+  DUPLICATE_SUSPECT over-flagging stays conservative (better to over-flag for human review
+  than under-report genuine duplicates).
+- **Self-check:** 39 -> 41 (2 new: IST epoch + two-digit month name; CLI PDF gating).
+  Version 0.7.1 -> 0.7.2. **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.

@@ -1,7 +1,7 @@
 """Self-check for the library. Run: python tests/test_matching.py"""
 import sys
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -181,7 +181,7 @@ def test_parse_recon_lines_verbatim():
     assert lines[0].fee == Decimal("29.00")
     assert lines[1].debit == Decimal("2425.00")
     assert lines[0].settlement_utr == "1568176960vxp0rj"
-    assert lines[0].created_at == datetime.fromtimestamp(1567692556, tz=timezone.utc).date()
+    assert lines[0].created_at == datetime.fromtimestamp(1567692556, tz=timezone(timedelta(hours=5, minutes=30))).date()
 
 
 def test_parse_recon_rejects_unknown_fields():
@@ -714,6 +714,29 @@ def test_cli_reconcile_end_to_end():
     assert (outdir / "tally.csv").exists()
     assert "MATCHED" in (outdir / "tally.csv").read_text(encoding="utf-8")
     assert (outdir / "exceptions.csv").exists()
+
+
+def test_ist_epoch_and_two_digit_month_name():
+    from settleflow import parse_date
+    from settleflow.parsers import _epoch_date
+    # 2026-01-01 23:30 UTC == 2026-01-02 05:30 IST -> IST calendar date is the 2nd
+    e = int(datetime(2026, 1, 1, 23, 30, tzinfo=timezone.utc).timestamp())
+    assert _epoch_date(e) == date(2026, 1, 2), f"_epoch_date = {_epoch_date(e)}"
+    # month-name with a 2-digit year parsed via the new %d-%b-%y format
+    assert parse_date("01-Jul-25") == date(2025, 7, 1)
+
+
+def test_cli_pdf_gating_non_sbi():
+    from settleflow.__main__ import _load_statement
+    import tempfile as _tf
+    d = _tf.mkdtemp()
+    p = Path(d) / "stmt.pdf"
+    p.write_bytes(b"%PDF-1.4 fake")
+    try:
+        _load_statement(str(p), "hdfc")
+        raise AssertionError("expected ValueError for non-SBI PDF")
+    except ValueError as e:
+        assert "only handles SBI" in str(e)
 
 
 if __name__ == "__main__":

@@ -18,13 +18,13 @@ Phases 1, 2, 4, 5 done; Phase 3 done for the formats with public evidence.
 - **Exceptions**: rule-based classifier + LLM-prompt builder + provider-agnostic `triage_exceptions` hook.
 - **CLI**: `python -m settleflow reconcile` (match → classify → export in one command).
 - **Thin SaaS**: FastAPI reconcile/expose/export loop (`saas/`).
-- Self-check: 39 checks.
+- Self-check: 41 checks.
 
 ## Quickstart
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py     # self-check (39 checks)
+python tests/test_matching.py     # self-check (41 checks)
 
 # one-command reconciliation:
 python -m settleflow reconcile \

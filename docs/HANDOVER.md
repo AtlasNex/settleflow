@@ -8,7 +8,7 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Project root: `E:/Sanjay Files/StartUp/open source/settleflow`
 - Package: `settleflow/` (models.py, matching.py, parsers.py, exports.py,
   exceptions.py, schemas.py, pdf.py, `__main__.py` = CLI)
-- Tests: `tests/test_matching.py` (assert-based self-check, 39 checks) +
+- Tests: `tests/test_matching.py` (assert-based self-check, 41 checks) +
   `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md)
 - SaaS: `saas/app.py` + `saas/templates/` + `saas/requirements.txt` + sample files
 - Docs: `docs/` (architecture, constraints, flow, decisions, bug, feature, rollback,
@@ -51,7 +51,7 @@ Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py            # self-check, 39 checks
+python tests/test_matching.py            # self-check, 41 checks
 
 # CLI — one-command reconciliation:
 python -m settleflow reconcile \

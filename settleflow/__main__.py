@@ -26,6 +26,12 @@ from .schemas import load_bank_statement, load_settlement_csv
 def _load_statement(path: str, bank: str):
     p = Path(path)
     if p.suffix.lower() == ".pdf":
+        if bank != "sbi":
+            raise ValueError(
+                f"--bank {bank} with a .pdf statement isn't supported: the PDF parser "
+                "only handles SBI (YONO/netbanking/credit-card). Export the statement "
+                "as CSV for other banks."
+            )
         return parse_sbi_pdf(p)
     return load_bank_statement(path, bank)
 

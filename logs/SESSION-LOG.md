@@ -189,3 +189,19 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   Kotak bankii-B.
 - **Verified:** both stress harnesses green; canonical self-check 39/39; hermes verify
   --skip-start green (0.7.1 wheel). Commit follows (D-25).
+
+## 2026-08-24 — Session 10 ("fix all" — IST epoch, date format, CLI PDF gating)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** "Fix all, complete all." Fixed the remaining gaps from the D-25 stress report:
+  (1) `_epoch_date` -> IST (+05:30) so the (amount,date) fallback aligns with Indian bank
+  statement dates (was one day off near midnight UTC); (2) `parse_date` accepts `%d-%b-%y`
+  ("01-Jul-25"); (3) CLI `--bank != sbi` + .pdf now raises a clear error instead of a
+  confusing SBI-layout error. Added 2 permanent self-check tests (IST epoch + two-digit
+  month name; CLI PDF gating). Version 0.7.1 -> 0.7.2. Self-check 39 -> 41.
+- **Deliberately kept (documented D-26):** `_is_money` exactly-2-decimals (a numeric refno
+  would be misread as money if widened); DUPLICATE_SUSPECT conservative over-flag.
+- **Deferred (needs inputs):** Cashfree/PhonePe/Juspay/PayU + IDFC parsers (real dashboard
+  exports); OCR scanned PDFs; hosted SaaS deployment.
+- **Verified:** 41/41 suite; both D-25 stress harnesses were already green; hermes verify
+  --skip-start green (0.7.2 wheel). Commit follows.
