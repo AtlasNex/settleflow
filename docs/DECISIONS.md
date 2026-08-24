@@ -250,3 +250,29 @@ survived because the OSS component layer is genuinely un-owned.
   merchant account); IDFC; scanned/OCR PDFs; hosted SaaS. UNBLOCK = one real
   dashboard export per gateway (see the ATL-90 comment for the exact list).
 - **Model:** deepseek-v4-flash-vision-exp (build + search). **Date:** 2026-08-24.
+
+### D-25: Rigorous stress test found + fixed 2 real bugs; documented ceilings
+- **Why:** ATL-91 — Sanjay: "check for anything missing, stress test this to the core."
+  Ran two adversarial harnesses (34 + 16 checks) against the invariants in CONSTRAINTS:
+  Decimal money, deterministic matching (incl. 500-line fuzz), trust boundaries, expose
+  /classify/parse edge cases, Level-2 netting + order matching, hostile-input fuzz, and a
+  real generated PDF.
+- **Bug 1 (fixed):** exports emitted money inconsistently — a whole-number amount printed
+  as `1000` while a fractional one printed `1000.00`, and an exempt TDS printed `0` vs
+  `0.00`. For accountant-facing CSVs (Tally/GST/TDS) that's a real defect. Fixed with a
+  single `_money()` helper (quantize to `0.01`) applied to every money cell; all existing
+  '100.00'/'-2446.84'/'1.00' asserts stay green.
+- **Bug 2 (fixed):** `extract_pdf_text` silently accepted a NON-PDF file. pymupdf
+  leniently opens plain text as a 1-page doc, so the library returned the raw text instead
+  of failing — the "silently coerce" anti-pattern CONSTRAINTS #2 forbids. Fixed by guarding
+  on `doc.is_pdf` after open and raising a clear `ValueError` (D-7 trust boundary).
+- **Verified ceilings (kept, not fixed — documented):** (a) `match()` (amount,date)
+  fallback can mis-pair when two bank lines share (amount,date) — already in CONSTRAINTS;
+  (b) `classify()` DUPLICATE_SUSPECT does not decrement the bank-side count, so it can
+  over-flag (conservative; flagged for human review, so safe); (c) `_epoch_date` converts
+  Razorpay's UTC epoch to a UTC date, which can skew the (amount,date) fallback by one day
+  for settlements near midnight UTC (IST is +5:30; primary UTR match unaffected). Fixing
+  (c) switches `created_at` to IST and would ripple through tests/docs — deferred for a
+  deliberate call, not a silent change.
+- **Self-check:** 39 -> still 39 (no regression); both stress harnesses green.
+- **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.

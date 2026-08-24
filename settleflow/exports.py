@@ -32,6 +32,16 @@ def _write(rows: list[list], header: list[str]) -> str:
     return buf.getvalue()
 
 
+def _money(value: Decimal) -> str:
+    """Format a rupee amount as a consistent 2-decimal string for exports.
+
+    Without this, whole-number amounts print as '1000' while fractional ones
+    print as '1000.00', which is inconsistent in accountant-facing CSVs
+    (Tally / GST / TDS). Quantize to paise so every money cell is 'x.xx'.
+    """
+    return str(Decimal(value).quantize(Decimal("0.01")))
+
+
 def export_tally_csv(result: ReconResult) -> str:
     """Bank-receipt rows for Tally import.
 
@@ -44,7 +54,7 @@ def export_tally_csv(result: ReconResult) -> str:
         rows.append([
             m.settlement.txn_date.isoformat(),
             m.settlement.ref or m.settlement.utr or "",
-            str(m.settlement.amount),
+            _money(m.settlement.amount),
             m.bank.utr or "",
             "MATCHED",
         ])
@@ -52,7 +62,7 @@ def export_tally_csv(result: ReconResult) -> str:
         rows.append([
             t.txn_date.isoformat(),
             t.ref or t.utr or "",
-            str(t.amount),
+            _money(t.amount),
             "",
             "PENDING_BANK",
         ])
@@ -60,7 +70,7 @@ def export_tally_csv(result: ReconResult) -> str:
         rows.append([
             t.txn_date.isoformat(),
             t.ref or t.utr or "",
-            str(t.amount),
+            _money(t.amount),
             t.utr or "",
             "UNEXPECTED_CREDIT",
         ])
@@ -78,11 +88,11 @@ def export_gst_worksheet(lines: list[ReconLine]) -> str:
         rows.append([
             b.settlement_id,
             b.utr or "",
-            str(b.gross),
-            str(b.fees),
-            str(b.taxes),
-            str(b.refunds),
-            str(b.net),
+            _money(b.gross),
+            _money(b.fees),
+            _money(b.taxes),
+            _money(b.refunds),
+            _money(b.net),
         ])
     return _write(
         rows,
@@ -126,10 +136,10 @@ def export_tds_1035(
             line.created_at.isoformat(),
             line.entity_id,
             line.order_id or "",
-            str(line.amount),
+            _money(line.amount),
             TDS_1035_CODE if not threshold_exempt else "EXEMPT_BELOW_5L",
-            str(tds),
-            str(line.amount - tds),
+            _money(tds),
+            _money(line.amount - tds),
             seller_pan or "",
         ])
     return _write(

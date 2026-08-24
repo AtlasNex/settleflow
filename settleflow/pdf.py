@@ -303,6 +303,12 @@ def extract_pdf_text(path: str | Path) -> str:
 
     doc = pymupdf.open(str(path))
     try:
+        if not doc.is_pdf:
+            raise ValueError(
+                f"{Path(path).name} is not a PDF file — refusing to parse non-PDF "
+                "input as a statement (D-7 trust boundary; pymupdf leniently opens "
+                "plain text as a 1-page doc)"
+            )
         if doc.needs_pass:
             raise PdfEncryptedError(
                 f"{Path(path).name} is password-protected; decrypt it (or export "

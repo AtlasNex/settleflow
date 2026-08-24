@@ -51,7 +51,7 @@ Git history (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py            # self-check, 38 checks
+python tests/test_matching.py            # self-check, 39 checks
 
 # CLI — one-command reconciliation:
 python -m settleflow reconcile \

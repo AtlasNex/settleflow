@@ -165,3 +165,27 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
 - **Verified:** 39/39 checks pass; `python -m settleflow` import + version 0.7.1.
 - **Docs:** SCHEMAS (bankii-B wired note), DECISIONS D-24, HANDOVER (bankii-B + gated
   list), SESSION-LOG.
+
+## 2026-08-24 — Session 9 (ATL-91: rigorous gap audit + stress test to the core)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** Sanjay: "check for anything missing, stress test this to the core, I want
+  Settleflow very successful." Read the full codebase (models/matching/parsers/exports/
+  exceptions/pdf/schemas/CLI + CONSTRAINTS), then ran TWO adversarial harnesses (34 + 16
+  checks): Decimal money traps, deterministic matching (incl 500-line fuzz), duplicate-UTR
+  consumption, colliding (amount,date), classify rule edges (fee drift/stale boundary/
+  duplicate suspect), trust-boundary fuzz (malformed money/dates/recon CSV/unicode/control
+  chars), Level-2 netting + order/refund matching, a real generated-PDF extract+parse, and
+  the UTC-vs-IST day shift.
+- **Fixed (2 real bugs):** (1) exports money printed inconsistently (1000 vs 1000.00; 0 vs
+  0.00) — added `_money()` quantize-to-0.01, applied to every money cell in
+  tally/gst/tds; (2) `extract_pdf_text` silently accepted a non-PDF (pymupdf opens plain
+  text as a 1-page doc) — guarded on `doc.is_pdf` and raise a clear ValueError (trust
+  boundary, D-7).
+- **Verified ceilings (kept, documented in D-25):** (amount,date) mis-pair on collisions;
+  DUPLICATE_SUSPECT over-flag (conservative); `_epoch_date` UTC day near midnight (IST +5:30)
+  — changing it would ripple through tests/docs, so deferred for a deliberate call.
+- **Doc drift fixed:** README + HANDOVER "38 checks" -> 39; README bank coverage now lists
+  Kotak bankii-B.
+- **Verified:** both stress harnesses green; canonical self-check 39/39; hermes verify
+  --skip-start green (0.7.1 wheel). Commit follows (D-25).

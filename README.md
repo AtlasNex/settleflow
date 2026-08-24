@@ -12,19 +12,19 @@ Phases 1, 2, 4, 5 done; Phase 3 done for the formats with public evidence.
 
 - **Level 1**: two-pass matching engine (exact UTR → amount+date fallback → unmatched).
 - **Level 2**: settlement-recon line-item parsing (Razorpay 24-param schema) + order-ledger matching + netting.
-- **Parsers (Phase 3)**: Razorpay settlement CSV + recon CSV, HDFC/SBI/ICICI/Axis/Kotak/PNB/DBS bank statements + Kotak Dr/Cr + SBI YONO/netbanking/credit-card. All headers verified in `docs/SCHEMAS.md`.
+- **Parsers (Phase 3)**: Razorpay settlement CSV + recon CSV, HDFC/SBI/ICICI/Axis/Kotak/PNB/DBS bank statements + Kotak Dr/Cr + Kotak bankii-B + SBI YONO/netbanking/credit-card. All headers verified in `docs/SCHEMAS.md`.
 - **PDF bank statements**: `parse_sbi_pdf` reads SBI YONO/netbanking/credit-card statements (optional `[pdf]` extra).
 - **Exports**: Tally CSV, GST worksheet, TDS code-1035 (ex-194O) worksheet.
 - **Exceptions**: rule-based classifier + LLM-prompt builder + provider-agnostic `triage_exceptions` hook.
 - **CLI**: `python -m settleflow reconcile` (match → classify → export in one command).
 - **Thin SaaS**: FastAPI reconcile/expose/export loop (`saas/`).
-- Self-check: 38 checks.
+- Self-check: 39 checks.
 
 ## Quickstart
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py     # self-check (38 checks)
+python tests/test_matching.py     # self-check (39 checks)
 
 # one-command reconciliation:
 python -m settleflow reconcile \
