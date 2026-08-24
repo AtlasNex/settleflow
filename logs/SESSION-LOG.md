@@ -131,3 +131,15 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   teardown — a harness issue, not a code defect; /health returns 200 during a live run).
 - **Docs:** SCHEMAS (PNB/DBS + SBI netbanking/credit), DECISIONS D-23, FEATURE, HANDOVER,
   README, CONSTRAINTS, SESSION-LOG.
+
+## 2026-08-24 — Session 7 (docs consistency: pdf.py coverage)
+
+- **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
+- **Did:** picked up the offer left hanging at the end of Session 6. `docs/ARCHITECTURE.md`
+  and `docs/FLOW.md` predated v0.7.0's `settleflow/pdf.py` and never mentioned PDF /
+  parse_sbi / pymupdf / scanned / OCR at all. Refreshed both: added `pdf.py` to the package
+  layout tree and import graph, a "PDF layer (pdf.py)" architecture section, the PDF branch
+  in the data-flow diagram, the zero-runtime-deps invariant (now "core stdlib-only, `[pdf]`
+  extra"), and flow sections for `extract_pdf_text` / `parse_sbi_statement` / `parse_sbi_pdf`.
+- **Verified:** self-check 38/38; git commit `0d1ad63` (docs-only, 2 files, +70/-9).
+- **Docs:** ARCHITECTURE.md, FLOW.md, SESSION-LOG.md.
