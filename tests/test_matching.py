@@ -7,6 +7,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# The thin SaaS layer's pure helpers. Imported here (not from a separate test
+# file) so the repo keeps ONE runnable check — and with no third-party import, so
+# this still runs on a machine where the [saas] extra was never installed.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "saas"))
+
+from helpers import (  # noqa: E402
+    decode_text,
+    guess_columns,
+    human_bytes,
+    md_to_html,
+    valid_email,
+)
+
 from settleflow import (
     MatchStatus,
     Txn,
@@ -767,6 +780,85 @@ def test_ocr_scanned_sbi_pdf():
     txns = parse_sbi_scanned_pdf(str(scan))
     assert any(t.amount == Decimal("500.00") and t.txn_date == date(2026, 4, 1) for t in txns), \
         f"OCR parse got {[(str(t.amount), t.txn_date) for t in txns]}"
+
+
+# ---------------------------------------------------------------------------
+# SaaS-layer helpers (saas/helpers.py)
+#
+# These decide what a user's uploaded file actually is. A wrong column mapping
+# produces a confident, wrong reconciliation, so the guessing logic is worth a
+# check of its own.
+# ---------------------------------------------------------------------------
+
+def test_saas_decode_text_is_total_and_bom_aware():
+    # A BOM must be stripped, not left inside the first column name — a header
+    # '\ufeffAmount' would defeat column detection on a perfectly good export.
+    assert decode_text(b"\xef\xbb\xbfAmount") == "Amount"
+    # cp1252 text with a byte UTF-8 cannot decode must not raise.
+    assert decode_text(b"Merch\x80nt") == "Merch\u20acnt"
+    # Real UTF-8 (rupee sign) round-trips.
+    assert decode_text("\u20b91,00,000".encode("utf-8")) == "\u20b91,00,000"
+    # Undecodable in every listed encoding still returns text rather than raising.
+    assert isinstance(decode_text(b"header\n\xff\xfe\x00"), str)
+
+
+def test_saas_guess_columns_prefers_exact_over_substring():
+    # 'Value Date' must win for date even though 'Amount' also contains 'a'... and
+    # critically, exact matches must be chosen before any substring pass runs.
+    got = guess_columns(["Value Date", "Description", "Amount", "UTR No"])
+    assert got == {"utr": "UTR No", "amount": "Amount", "date": "Value Date"}, got
+
+
+def test_saas_guess_columns_ignores_short_substrings():
+    # 'cr' (2 chars) appears inside 'Description'; without the min-length guard
+    # the amount column would be silently mapped to a text field.
+    got = guess_columns(["Description"])
+    assert got["amount"] is None, got
+    assert got["utr"] is None and got["date"] is None, got
+
+
+def test_saas_guess_columns_returns_none_rather_than_guessing():
+    got = guess_columns(["alpha", "beta", "gamma"])
+    assert got == {"utr": None, "amount": None, "date": None}, got
+    assert guess_columns([]) == {"utr": None, "amount": None, "date": None}
+
+
+def test_saas_email_validation_is_strict_at_the_boundary():
+    assert valid_email("  Sanjay@AtlasNex.com ") == "sanjay@atlasnex.com"
+    for bad in ("nope", "a@b", "@b.co", "a@.co", "", "   ", "a b@c.co",
+                ("x" * 260) + "@b.co"):
+        assert valid_email(bad) is None, bad
+
+
+def test_saas_md_to_html_escapes_before_converting():
+    out = md_to_html("<script>alert(1)</script>")
+    assert "<script>" not in out, out
+    assert "&lt;script&gt;" in out, out
+    # A link written in raw HTML must not survive as a live tag either.
+    assert "<img" not in md_to_html('<img src=x onerror=alert(1)>')
+
+
+def test_saas_md_to_html_renders_the_documented_subset():
+    out = md_to_html(
+        "# Title\n\n"
+        "Text with **bold**, `code` and [a link](https://example.test/x).\n\n"
+        "- one\n- two\n\n"
+        "1. first\n"
+    )
+    assert "<h1>Title</h1>" in out, out
+    assert "<strong>bold</strong>" in out and "<code>code</code>" in out, out
+    assert '<a href="https://example.test/x" rel="noopener">a link</a>' in out, out
+    assert "<ul>" in out and "<li>one</li>" in out and "</ul>" in out, out
+    assert "<ol>" in out and "<li>first</li>" in out, out
+    # Lists must be closed, or the legal pages nest every later paragraph.
+    assert out.count("<ul>") == out.count("</ul>"), out
+    assert out.count("<ol>") == out.count("</ol>"), out
+
+
+def test_saas_human_bytes_reads_like_a_person_says_it():
+    assert human_bytes(10) == "10 B"
+    assert human_bytes(2048) == "2.0 KB"
+    assert human_bytes(10 * 1024 * 1024) == "10.0 MB"
 
 
 if __name__ == "__main__":
