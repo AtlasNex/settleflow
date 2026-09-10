@@ -265,3 +265,63 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   origin/master, and the live endpoint still 200.
 - **Verified:** `hermes verify --skip-start --json` green (bootstrap settleflow-0.7.3,
   test 42/42, source: manifest); `/health` 200. Commit follows.
+
+## 2026-09-11 — Session 14 (hosted-layer hardening + publish the repo)
+
+- **Model:** deepseek-v4.1-flash. Provider: nous.
+- **Asked:** "Work on Settleflow. Complete it end to end. 100%." with the six-phase prompt
+  written in the previous turn. NexTrade parked (no capital) and left alone.
+
+- **Did (Phase 1, the blocker):** `/runs` and `/runs/<id>/export/*.csv` were public and
+  unauthenticated, enumerable by integer id — every uploaded statement's matched UTRs, amounts
+  and exception text were readable by anyone. Replaced with a per-run capability URL
+  `/r/<token>` (~144 bits, D-29). Also fixed a genuine correctness bug: every upload was written
+  to ONE fixed path (`saas/upload_bank.csv`), so concurrent reconciliations clobbered each
+  other's statement. Plus upload caps, suffix checks, 400s that name the columns found, enforced
+  30-day retention (the disk is at 91%), per-IP rate limiting (60/h), and Swagger/redoc off.
+
+- **Found by probing from OUTSIDE after the fix shipped:** the live site still served the leaked
+  CSV. Cloudflare had cached it at the edge — `cf-cache-status: HIT`, `Age: 2079`,
+  `max-age: 14400` — because `.csv` is in CF's default cacheable-extension list. **Removing a
+  route does not un-publish what the CDN already holds.** Purged via the API (`prefixes`), then
+  made run responses `no-store` and added a canary check so it cannot regress silently (D-30).
+  This is the single most valuable finding of the session and it came from not trusting loopback.
+
+- **Did (Phases 2-4):** results page with totals/exceptions/downloads; bank-column auto-detection
+  with an Advanced override; real pages (`/about`, `/pricing`, `/contact`, `/privacy`, `/terms`)
+  plus `sitemap.xml` and `llms.txt`; lead capture (stored + shown honestly, delivery blocked on
+  SMTP creds); CONTRIBUTING / SECURITY / issue templates; `brand-context.md`; CI.
+
+- **Published:** repo flipped PUBLIC (owner-approved), release `v0.7.3`, CI green 6/6 including a
+  job that boots the app and runs the end-to-end canary on a clean runner. Before flipping, a
+  secret scan over the tree and full history (clean) — and one real find: `scripts/deploy.sh`
+  hardcoded the origin IP, which is deliberately absent from public DNS. Committing it would have
+  handed out a route around the Cloudflare rules in front of the origin. Redacted; host now comes
+  from env (D-31).
+
+- **Did (Phase 5):** `scripts/deploy.sh` (idempotent, refuses on red self-check, backs up,
+  restarts, asserts health + canary + public URL) and `scripts/rollback.sh`. A 15-minute Hermes
+  watchdog runs the canary against the public URL with Telegram alerting.
+
+- **The rollback drill earned its place.** Running `rollback.sh latest` for real exposed two bugs:
+  `--list` fell through and was treated as a target, and it validated the restored release with
+  the canary *inside the archive* — so a drill passes while the release is broken, because the old
+  tool shares the old release's blind spot (D-32). Fixed and re-verified live.
+
+- **Fixed from the delegated content work (checked files, not the summary):** the CI workflow
+  targeted branch `main` (repo is `master`, so it would never have run on a push) and its
+  zero-dependency job failed on any Windows machine because `pywin32` bootstraps itself before
+  user code — a permanently-red check teaches people to ignore it. Replaced with
+  `tests/test_zero_dependency_core.py`, which diffs what *settleflow* imports. Also the README's
+  headline example called `result.unmatched`, which does not exist on `ReconResult` — the first
+  code a stranger would run raised `AttributeError`.
+
+- **Verified:** `python tests/test_matching.py` → 50/50 (was 42). A 40-check local battery
+  including a 12-way concurrent-upload regression (12 distinct tokens, zero cross-contamination).
+  Live from outside: the six leak paths 404, run responses no-store, pages 200, GitHub release and
+  raw LICENSE 200 anonymously. Full item-by-item record: `docs/COMPLETION.md`.
+
+- **Not done:** PayU/PhonePe/Juspay/Cashfree parsers (`docs/RESEARCH-gateway-samples.md` — a
+  guessed schema is forbidden and is how silently wrong ledgers get made), PyPI (no account/token),
+  workpaper email delivery (Proton SMTP creds), Cloudflare managed-robots.txt (zone policy),
+  uptime-kuma monitor (no login). Each is named in COMPLETION.md with what would unblock it.

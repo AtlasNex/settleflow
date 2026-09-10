@@ -341,3 +341,53 @@ survived because the OSS component layer is genuinely un-owned.
 - **Deployment is host-run (not containerized) on this box**; the Dockerfile/compose remain
   for hosts where AppArmor/LXC is not a Docker-build blocker.
 - **Model:** deepseek-v4-flash-vision-exp. **Date:** 2026-08-24.
+
+### D-29: A run is reached by an unguessable token, not an account and not a listing
+- **Why:** `/runs` listed every uploaded statement to anyone, and `/runs/<id>/export/tally.csv`
+  downloaded the workpaper. Integer ids made it enumerable, so the exposure was one `for` loop
+  wide. Any real merchant's first upload would have been world-readable.
+- **What:** `secrets.token_urlsafe(24)` (~144 bits) per run; results at `/r/<token>`, exports at
+  `/r/<token>/export/<name>.csv`. No accounts, no login — that would be a different product and
+  the thinnest thing that closes the hole is a capability URL.
+- **Consequence accepted:** no account means no recovery. Lose the URL and the run is gone. The
+  results page says so in as many words ("Bookmark this page") rather than pretending otherwise.
+- **Legacy rows:** predate the column, keep a NULL token, and are unreachable. That is the intended
+  outcome, not a migration gap.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-30: Run responses are `no-store`, and the canary asserts it
+- **Why (evidence, not theory):** after the route was removed, the live site still served the leaked
+  CSV from Cloudflare's edge — `cf-cache-status: HIT`, `Age: 2079`, `max-age=14400`. Reminiscent of
+  the real lesson: **removing a route does not un-publish what a CDN already holds**. `.csv` is in
+  Cloudflare's default cacheable-extension list.
+- **What:** middleware sets `Cache-Control: no-store, private` and `X-Robots-Tag: noindex` on
+  `/r/*`, `/reconcile`, `/health` and `*/notify`. `/health` is included because a cached health
+  check is the "process is up" illusion. The canary's `cache_headers` check fails if this regresses.
+- **Verification:** through the public URL — `/r/<token>` → `cf-cache-status: DYNAMIC`,
+  export → `BYPASS`; the previously cached URL now 404s. Purge was by API `prefixes`
+  (`<host>/runs/`).
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-31: The origin host is never committed
+- **Why:** `scripts/deploy.sh` had `root@<origin-ip>` as a default. The repo is now public and that
+  address is deliberately absent from public DNS (Cloudflare proxies the hostname), so publishing it
+  hands out a route that bypasses the Cloudflare rules in front of the origin. Two docs named it too;
+  both were redacted.
+- **What:** the host comes from `SETTLEFLOW_HOST` or a gitignored `scripts/.deploy.env`. `--help`
+  works with no target set; the scripts refuse to run without one and say how to set it.
+- **Side benefit:** the deploy scripts are now genuinely usable by anyone self-hosting, which the
+  hardcoded address made impossible.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-32: A canary does a real reconcile, because a health check cannot see a broken product
+- **Why:** the failure mode this project keeps hitting is "process up, product broken" — a container
+  heartbeating for weeks, a dashboard rendering blank, an app answering 200 on `/health` while the
+  results page is wrong. A liveness probe is blind to all of it.
+- **What:** `scripts/canary.py` (stdlib only) uploads a real settlement file and bank statement,
+  follows the private run URL, reads the tally export, asserts every path from the 11 Sep incident is
+  still 404, and asserts run responses are still `no-store`. It runs in CI (proving the app boots on
+  a clean runner), on the server after every deploy, and every 15 minutes from a Hermes watchdog
+  against the public URL.
+- **Design choice:** the checks live in the repo, not the watchdog, so they move with the product.
+  The watchdog only does alerting (first failure, every 6th, recovery).
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.

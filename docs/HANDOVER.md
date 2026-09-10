@@ -17,7 +17,39 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Money docs: `docs/MONETIZATION.md` (deep-research) + `docs/COMMERCIAL.md` (Sidekiq
   licensing) + `funding.json` + `.github/FUNDING.yml`
 
-## Current state (2026-08-25)
+## Current state (2026-09-11)
+
+### Session 14 — hosted layer hardened, repo published
+
+**The headline risk is closed.** The thin SaaS had a public `/runs` listing and
+integer-id `/runs/<id>/export/*.csv` downloads: every uploaded statement's matched UTRs,
+amounts and exception text were readable by anyone, unauthenticated. Runs are now
+reachable only via an unguessable `/r/<run_token>` (D-29), and the old rows are
+unreachable. The same file also wrote every upload to one fixed path, so concurrent
+reconciliations clobbered each other (fixed, with a 12-way regression test).
+
+Found by probing from **outside** after the fix shipped: Cloudflare kept serving the leaked
+CSV from its edge cache (`cf-cache-status: HIT`) for the rest of a 4-hour TTL. Cached
+objects purged; run responses are now `no-store` and the canary asserts it (D-30).
+
+**The repo is now genuinely open source:** PUBLIC on GitHub, MIT, CI green on
+3.10/3.11/3.12 (self-check + zero-dependency-core + a boot-the-app integration job that runs
+the canary), CONTRIBUTING / SECURITY / issue templates, legal drafts in `docs/legal/`
+(marked DRAFT), `brand-context.md`, real pages at `/about`, `/pricing`, `/contact`,
+`/privacy`, `/terms`, plus `sitemap.xml` and `llms.txt`. Release `v0.7.3`. Note: the origin
+host is deliberately **not** in the repo (D-31) — set `SETTLEFLOW_HOST` or
+`scripts/.deploy.env`.
+
+**Ops:** `scripts/deploy.sh` (idempotent, refuses to ship on a red self-check, backs up,
+restarts, then asserts health + the end-to-end canary + the public URL) and
+`scripts/rollback.sh` (exercised for real this session; that drill is what found that it
+validated a restored release with the *rolled-back* canary, D-32). A 15-minute Hermes
+watchdog runs the canary against the public URL and alerts on Telegram.
+
+**Read `docs/COMPLETION.md` first** — it is the item-by-item DONE / PARTIAL / DEFERRED /
+BLOCKED record with the evidence for each, and it lists what is still blocked and on whom.
+
+### Earlier state (2026-08-25)
 
 All phases done; bank + gateway parser coverage is complete for every format
 with a public sample. The library is end-to-end usable via a CLI.
@@ -70,6 +102,20 @@ parse_sbi_pdf("statement.pdf")           # SBI YONO / netbanking / credit card
 ```
 
 ## What is next
+
+1. **Gateway parsers (Cashfree / PhonePe / Juspay / PayU) and IDFC** — still gated on a real
+   sample (`docs/CONSTRAINTS.md` #2 forbids guessing a schema). `docs/RESEARCH-gateway-samples.md`
+   records what was searched and what, if anything, was found publicly.
+2. **PyPI** — blocked on an account/token. `pip install git+https://github.com/AtlasNex/settleflow.git`
+   works today (verified in a clean venv).
+3. **Email delivery of the workpaper pack** — the capture writes rows and the code never fakes a
+   send; wiring needs Proton SMTP creds as `SETTLEFLOW_SMTP_{HOST,PORT,USER,PASS,FROM}`.
+4. **Cloudflare managed robots.txt** — the origin file now allows AI crawlers on the public pages,
+   but the zone's *managed* policy takes precedence, so citability is unchanged until that is
+   switched off in the dashboard.
+5. **uptime-kuma monitor** — needs the kuma admin login to create.
+
+### Older "what is next" (2026-08-25, kept for context)
 
 **Parser coverage is complete** for every format with a public sample. The
 remaining items are gated on real files that D-24 definitively confirmed are
