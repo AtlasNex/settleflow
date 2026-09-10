@@ -103,9 +103,14 @@ parse_sbi_pdf("statement.pdf")           # SBI YONO / netbanking / credit card
 
 ## What is next
 
-1. **Gateway parsers (Cashfree / PhonePe / Juspay / PayU) and IDFC** — still gated on a real
-   sample (`docs/CONSTRAINTS.md` #2 forbids guessing a schema). `docs/RESEARCH-gateway-samples.md`
-   records what was searched and what, if anything, was found publicly.
+1. **Gateway parsers** — PhonePe settlement is **wired** (`load_phonepe_settlement_csv`, and it is
+   the one case where the file shape differs from ours: rows are per-transaction, so they net per
+   `BankReferenceNo`). Still to build, all specified with verbatim sources in
+   `docs/RESEARCH-gateway-samples.md`: the Cashfree two-section recon parser (14 + 63 cols, marker
+   `** Settlement Reconciliation Details **`), PayU's two official settlement **APIs** as JSON
+   parsers, and the Juspay 25-column map (money unit corroborated rupees, not officially stated).
+   IDFC stays `None`: no real file or official sample exists, and the two community CSV claims
+   contradict each other. Never guess a schema (`docs/CONSTRAINTS.md` #2).
 2. **PyPI** — blocked on an account/token. `pip install git+https://github.com/AtlasNex/settleflow.git`
    works today (verified in a clean venv).
 3. **Email delivery of the workpaper pack** — the capture writes rows and the code never fakes a

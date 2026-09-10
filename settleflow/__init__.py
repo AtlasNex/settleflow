@@ -61,6 +61,7 @@ from .schemas import (
     ColumnMap,
     ReconColumnMap,
     load_bank_statement,
+    load_phonepe_settlement_csv,
     load_settlement_csv,
     load_vendor_recon_csv,
 )
@@ -125,6 +126,7 @@ __all__ = [
     "ColumnMap",
     "ReconColumnMap",
     "load_bank_statement",
+    "load_phonepe_settlement_csv",
     "load_settlement_csv",
     "load_vendor_recon_csv",
 ]

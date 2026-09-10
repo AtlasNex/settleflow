@@ -391,3 +391,25 @@ survived because the OSS component layer is genuinely un-owned.
 - **Design choice:** the checks live in the repo, not the watchdog, so they move with the product.
   The watchdog only does alerting (first failure, every 6th, recovery).
 - **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-33: D-24's "merchant-private" conclusion was wrong for PhonePe, and PayU was the wrong shape
+- **What D-24 said (2026-08-24):** Cashfree/PhonePe/Juspay/PayU settlement and recon files are
+  merchant-private dashboard exports; no public sample is obtainable; D-7's gate therefore blocks
+  all four.
+- **What the 2026-09-11 search found (docs/RESEARCH-gateway-samples.md):** two real committed
+  PhonePe merchant exports with 1,038 data rows (which also resolve the undocumented `PaymentType`
+  values and date formats D-19 was blocked on); a real Cashfree recon export proving 63 columns,
+  not 48; two official PayU settlement **APIs** with complete documented sample JSON; and a
+  readily-fetchable Juspay docs page with the full 25-column schema.
+- **Why D-24 was wrong:** it searched for a *CSV* for PayU, and no CSV can exist — PayU's export
+  columns are chosen per merchant in a dashboard dialog, so the correct target was always the API.
+  For PhonePe it appears no one had looked at committed merchant exports in unrelated repositories.
+- **Consequence:** PhonePe is now wired (with the per-settlement netting the file shape requires);
+  PayU's fix is API parsers; Cashfree recon needs a two-section parser; IDFC remains genuinely
+  deferred — for IDFC the gate held up.
+- **Lesson for this repo:** "not publicly available" is a conclusion that expires. Re-test a
+  blocking claim before treating it as a constraint, and record *what was searched*, not just the
+  verdict — the negative results in the research doc are as useful as the positives.
+- **Also decided:** the real files must not be vendored (they carry a named merchant's real UTRs);
+  fixtures are regenerated from the real header with invented values, as D-19 did for banks.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.

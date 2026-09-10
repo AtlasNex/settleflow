@@ -34,6 +34,7 @@ from settleflow import (
     extract_pdf_text,
     group_batches,
     load_bank_statement,
+    load_phonepe_settlement_csv,
     load_settlement_csv,
     load_vendor_recon_csv,
     match,
@@ -859,6 +860,61 @@ def test_saas_human_bytes_reads_like_a_person_says_it():
     assert human_bytes(10) == "10 B"
     assert human_bytes(2048) == "2.0 KB"
     assert human_bytes(10 * 1024 * 1024) == "10.0 MB"
+
+
+def test_phonepe_settlement_report_aggregates_per_bank_credit():
+    # PhonePe's settlement report is one row per TRANSACTION; a bank credit is one
+    # per settlement. Rows sharing a BankReferenceNo (the settlement UTR) must net
+    # together (Amount + Fee + IGST + CGST + SGST) into a single Txn. Feeding the
+    # per-row amounts to the matcher would try to match each transaction against one
+    # bank credit — a wall of false unmatched rows, and the (amount, date) fallback
+    # could pair the wrong ones outright.
+    fixture = (Path(__file__).resolve().parent / "fixtures" / "phonepe"
+               / "settlement_report_synthetic.csv")
+    txns = load_phonepe_settlement_csv(str(fixture))
+
+    # The fixture's last row has no BankReferenceNo: not settled to any credit yet,
+    # so it must not produce a Txn.
+    assert len(txns) == 2, [(t.utr, str(t.amount)) for t in txns]
+    by_utr = {t.utr: t for t in txns}
+
+    a = by_utr["AXNPNTESTUTR0001"]
+    assert a.amount == Decimal("1284.90"), a.amount     # 989.93 + 494.97 - 200.00
+    assert a.txn_date == date(2025, 10, 2), a.txn_date
+    assert a.ref == "MREF-TEST-1001", a.ref
+
+    b = by_utr["AXNPNTESTUTR0002"]
+    assert b.amount == Decimal("1979.86"), b.amount     # 2000 - 14.80 - 2.66 - 1.34 - 1.34
+    assert b.txn_date == date(2025, 10, 4), b.txn_date
+
+    # And it must be reachable through the registered vendor name, not a special
+    # case the caller has to know about.
+    routed = load_settlement_csv(str(fixture), "phonepe_settlement_csv")
+    assert [t.utr for t in routed] == [t.utr for t in txns]
+    assert [t.amount for t in routed] == [t.amount for t in txns]
+
+
+def test_phonepe_settlement_report_rejects_a_bad_date_loudly():
+    # Trust boundary: a malformed date must raise naming the column and the
+    # settlement, never coerce silently.
+    import tempfile as _tf
+    bad = ("PaymentType,MerchantReferenceId,PhonePeReferenceId,From,Instrument,"
+           "Flow Type,CreationDate,TransactionDate,SettlementDate,BankReferenceNo,"
+           "Amount,Fee,IGST,CGST,SGST\n"
+           "PAYMENT,M1,P1,S,UPI_FULFILMENT,CREDIT,01-10-2025,01-10-2025,"
+           "not-a-date,AXNPNTESTUTR0009,100.00,-1.00,0,0,0\n")
+    with _tf.NamedTemporaryFile("w", suffix=".csv", delete=False,
+                                encoding="utf-8") as fh:
+        fh.write(bad)
+        path = fh.name
+    try:
+        load_phonepe_settlement_csv(path)
+        raise AssertionError("a malformed SettlementDate was accepted")
+    except ValueError as exc:
+        assert "SettlementDate" in str(exc), exc
+        assert "AXNPNTESTUTR0009" in str(exc), exc
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

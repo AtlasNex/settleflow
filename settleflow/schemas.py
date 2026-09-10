@@ -19,7 +19,10 @@ Juspay settlement file (money unit unstated). See docs/SCHEMAS.md.
 """
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from .models import ReconLine, Txn
@@ -27,7 +30,9 @@ from .parsers import (
     load_bank_statement_csv,
     load_csv,
     load_recon_csv,
+    parse_amount,
     parse_bank_text,
+    parse_date,
     parse_drcr_statement,
     parse_razorpay_recon,
     parse_razorpay_settlements,
@@ -87,8 +92,20 @@ SETTLEMENT_CSV_MAPS: dict[str, ColumnMap | None] = {
     ),
     "cashfree_settlement_csv": None,   # plain settlement report header not public
     "payu_settlement_csv": None,       # columns are user-selectable; no fixed header
-    "phonepe_settlement_csv": None,    # verified fields but needs dedicated parser
-    "juspay_settlement_csv": None,     # verified schema but money unit unstated
+    # PhonePe's settlement report is one row per TRANSACTION, so the rows must be
+    # aggregated per bank credit before level-1 matching — see
+    # load_phonepe_settlement_csv() below, which this map feeds. Column names below
+    # are verbatim from two real publicly committed merchant exports (15-col and
+    # 23-col variants; this is the 15-col set), captured 2026-09-11 in
+    # docs/RESEARCH-gateway-samples.md. Parse by header name, never position: the
+    # 23-col variant inserts columns mid-file.
+    "phonepe_settlement_csv": ColumnMap(
+        utr_col="BankReferenceNo",      # PhonePe's own column glossary: the settlement UTR
+        amount_col="Amount",            # row-level amount; NOT the settled total (see below)
+        date_col="SettlementDate",      # dd-MM-yyyy
+        ref_col="MerchantReferenceId",
+    ),
+    "juspay_settlement_csv": None,     # 25-col schema documented; money unit unstated
 }
 
 
@@ -175,6 +192,73 @@ TEXT_BANK_PARSERS = {
 # Loaders
 # ---------------------------------------------------------------------------
 
+def load_phonepe_settlement_csv(path) -> list[Txn]:
+    """Load PhonePe's settlement report as one Txn per BANK CREDIT (not per row).
+
+    PhonePe's file is one row per TRANSACTION. Rows that share a `BankReferenceNo`
+    (which is the settlement UTR) were settled to the bank as a single credit, and
+    what reaches the bank is the row amount net of fee and taxes. PhonePe's own docs
+    state the relation:
+
+        settled = Amount + Fee + IGST + CGST + SGST
+
+    and the fee/tax cells are negative in real exports — verified against two
+    publicly committed merchant files on 2026-09-11 (docs/RESEARCH-gateway-samples.md).
+
+    This aggregates before handing anything to the matcher. Feeding the per-row
+    amounts to `match()` instead would try to match each transaction against one
+    bank credit: a wall of false "unmatched", and the (amount, date) fallback could
+    pair the wrong rows outright.
+
+    NOT VERIFIED: the aggregate has never been compared against a real bank credit
+    for the same settlement. The formula is documented and the per-row fields are
+    observed in real files, but the join between them is untested. Fix this the
+    first time a real PhonePe settlement total is available — that is the one thing
+    missing, and until then this map is the best-supported reading of the evidence.
+    """
+    raw = Path(path).read_text(encoding="utf-8-sig")
+
+    nets: dict[str, Decimal] = {}
+    dates: dict[str, object] = {}
+    refs: dict[str, str | None] = {}
+    order: list[str] = []
+
+    for row in csv.DictReader(io.StringIO(raw)):
+        utr = (row.get("BankReferenceNo") or "").strip()
+        if not utr:
+            continue        # not yet settled to a bank credit
+
+        try:
+            settled = parse_amount((row.get("Amount") or "").strip() or "0")
+        except ValueError as exc:
+            raise ValueError(
+                f"PhonePe Amount could not be read for settlement {utr!r}: {row.get('Amount')!r}"
+            ) from exc
+        for col in ("Fee", "IGST", "CGST", "SGST"):
+            cell = (row.get(col) or "").strip()
+            if cell:
+                settled += parse_amount(cell)
+
+        if utr not in nets:
+            date_cell = (row.get("SettlementDate") or "").strip()
+            try:
+                dates[utr] = parse_date(date_cell)
+            except ValueError as exc:
+                raise ValueError(
+                    f"PhonePe SettlementDate could not be read ({date_cell!r}) for "
+                    f"settlement {utr!r}; expected dd-MM-yyyy"
+                ) from exc
+            nets[utr] = Decimal(0)
+            refs[utr] = (row.get("MerchantReferenceId") or "").strip() or None
+            order.append(utr)
+        nets[utr] += settled
+
+    return [
+        Txn(utr=utr, amount=nets[utr], txn_date=dates[utr], ref=refs[utr])  # type: ignore[arg-type]
+        for utr in order
+    ]
+
+
 def load_settlement_csv(path, vendor: str) -> list[Txn]:
     """Load a vendor settlement CSV using its registered column map.
 
@@ -189,6 +273,11 @@ def load_settlement_csv(path, vendor: str) -> list[Txn]:
             f"{vendor}: column map not filled — supply a real sample file's header "
             "(D-7: never guess a schema; see docs/SCHEMAS.md)"
         )
+    if vendor == "phonepe_settlement_csv":
+        # This vendor's file is per-transaction while ours is per-batch; the
+        # aggregating loader above does the netting. Everywhere else the map alone
+        # is the whole story.
+        return load_phonepe_settlement_csv(path)
     return load_csv(path, cm.utr_col, cm.amount_col, cm.date_col, cm.ref_col)
 
 

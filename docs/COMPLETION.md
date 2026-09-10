@@ -82,11 +82,30 @@ the owner can supply) · **SKIPPED** (deliberately not done).
    concurrency test — worth knowing for next time.)
 5. **The README's first example did not run** (see item 21).
 
+6. **A blocking conclusion from a previous session was wrong.** D-24 had recorded Cashfree/PhonePe/
+   Juspay/PayU settlement files as unobtainable "merchant-private" exports, which is why those
+   parsers sat unwired. Asked to re-check the internet rather than accept it, the search found real
+   committed PhonePe merchant exports (with the exact evidence that resolves the old blockers), a
+   real Cashfree recon export proving the column count was wrong, official PayU settlement APIs
+   with sample JSON, and a fetchable Juspay schema page. It also established where the original
+   reasoning failed: for PayU it searched for a CSV that structurally cannot exist. PhonePe is now
+   wired; the rest are specified. Recorded as D-33 with the lesson — *a negative result expires,
+   and recording what was searched matters as much as the verdict.*
+
 ## Not done, and why
 
-- **PayU / PhonePe / Juspay / Cashfree parsers** — see `docs/RESEARCH-gateway-samples.md`. Building
-  against a guessed schema is forbidden (`docs/CONSTRAINTS.md` #2), and it is how silently wrong
-  ledgers get made.
+- **PayU / PhonePe / Juspay / Cashfree parsers** — **partly unblocked this session.**
+  `docs/RESEARCH-gateway-samples.md` (searched at the owner's insistence, against an earlier
+  "merchant-private" conclusion) found that **D-24 was partly wrong**: two real committed PhonePe
+  merchant exports exist, a real Cashfree recon export proves 63 columns not 48, PayU has two
+  officially documented settlement **APIs** (a CSV can never exist — its columns are chosen per
+  merchant in a dashboard dialog), and the Juspay 25-column schema page fetches fine.
+  **PhonePe is now wired** (`load_phonepe_settlement_csv`, netting per `BankReferenceNo`, tested
+  against a synthetic fixture) — with the one gap named in the docstring: the aggregate has never
+  been compared against a real bank credit. The rest are specified-and-ready, not guessed:
+  Cashfree recon needs a two-section parser, PayU needs API-JSON parsers, Juspay needs its map
+  with a money-unit caveat. **IDFC remains genuinely deferred** — no real file or official sample
+  exists publicly, and the two community CSV claims contradict each other.
 - **PyPI** — blocked on an account/token only the owner can create.
 - **Email delivery of the workpaper pack** — blocked on Proton SMTP credentials.
 - **Cloudflare managed-robots.txt** — a zone-level policy change, left to the owner.

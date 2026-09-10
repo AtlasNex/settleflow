@@ -114,3 +114,29 @@ Money: INR rupees, plain decimal. Password-locked PDFs -> `PdfEncryptedError`;
 image-only (scanned) PDFs -> `PdfScannedError` (OCR is a separate unbuilt
 layer). Source: anonymised text fixtures from the Apache-2.0
 `raptar231/indian-bank-statement-parser` (`tests/fixtures/sbi/`, see NOTICE.md).
+
+---
+
+## 2026-09-11 research update — D-24 was partly wrong
+
+Full evidence (URLs, verbatim headers, what was searched and failed) lives in
+**`docs/RESEARCH-gateway-samples.md`**. Read that before re-running any of this search.
+Summary of what changed:
+
+| Target | Was | Now |
+|---|---|---|
+| **PhonePe settlement** | `None` — "tax columns + undocumented type values, real file needed" | **WIRED.** Two real publicly committed merchant exports exist (15-col and 23-col variants). Column names are verbatim above; `BankReferenceNo` is the settlement UTR. Because the file is per-transaction and a bank credit is per-settlement, `load_phonepe_settlement_csv()` nets `Amount + Fee + IGST + CGST + SGST` per `BankReferenceNo`. Tested against a synthetic fixture (`tests/fixtures/phonepe/`). **Caveat: the aggregate has never been checked against a real bank credit.** |
+| **Cashfree recon** | 48 columns | **63 columns.** A real (header-only) export proves it: section 1 is 14 cols with first header literally `Id`; section 2 is 63 (`Key_4..Key_10`, `Surcharge Amount`, `Tax on Surcharge`, `Payment Mode SubType`). Section marker: `** Settlement Reconciliation Details **`. Still needs a dedicated two-section parser — the `cashfree_recon_csv` map stays `None`. |
+| **Cashfree plain settlements** | "not public" | Still absent, but the page-level doc confirms no per-column table exists → use the documented `GET /settlements` JSON API instead. |
+| **PayU settlement** | "needs a real dashboard export" | **Permanently un-findable as CSV** — the export's columns are user-selectable in a dashboard dialog, so no fixed public header can exist. Two *official APIs* have complete documented sample JSON (`/settlement/range`, `/settlement/transactionDetails`) → build API parsers, not a CSV map. |
+| **Juspay settlement** | "money unit unstated" | 25-column official schema page is fully fetchable (no JS wall) with enums and status maps. Money unit is still officially "Integer"; Juspay's own production parser reads the values as plain rupee decimals → **rupees**, verdict-corrobation. Map stays `None` until wired. |
+| **IDFC** | No verified source | Confirmed: **no real IDFC file or official sample exists publicly** (four production PDF parsers corroborate the same text layout, but all four test against hand-written mock text, and the two community CSV claims contradict each other). The `idfc: None` entry is correct and should stay; the four source URLs are listed in the research doc so this search is not repeated. |
+
+### Non-negotiables the research reinforced
+
+- The real PhonePe/Cashfree files contain a **named merchant's real UTRs and order
+  references**. They must never be vendored here — hence the synthetic fixture with a
+  real header. Copying them would re-publish someone else's financial data.
+- `nammayatri/shared-kernel` is AGPL-3.0 (Juspay's own): transcribe column *names*, never code.
+- Repos with no license (`GunalThiru/KCMS`, `suryaansh001/sabrang_self_backend`, `mdsdqk/nook`):
+  headers and value semantics are facts and are fine to record; files are not.
