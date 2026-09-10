@@ -20,9 +20,19 @@
 # `docker compose build` fails. The service runs host-run under systemd from
 # /opt/settleflow, and the .venv lives there and must survive a deploy — which is
 # why this ships an allowlist of paths rather than mirroring the repo tree.
+#
+# The host is NOT hardcoded. This repository is public and the origin IP is not in
+# public DNS (Cloudflare proxies it), so committing the address would hand out a
+# direct route that bypasses the Cloudflare Access rules on this origin. Set it in
+# the environment, or in the gitignored scripts/.deploy.env.
 set -uo pipefail
 
-HOST="${SETTLEFLOW_HOST:-root@13.140.59.39}"
+_HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+[ -f "$_HERE/.deploy.env" ] && . "$_HERE/.deploy.env"
+
+HOST="${SETTLEFLOW_HOST:-}"
+
 REMOTE_DIR="${SETTLEFLOW_REMOTE_DIR:-/opt/settleflow}"
 BACKUP_DIR="${REMOTE_DIR}-backups"
 UNIT="${SETTLEFLOW_UNIT:-settleflow}"
@@ -40,6 +50,13 @@ for arg in "$@"; do
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
+
+# Checked after --help so the usage text works on a machine with no target set.
+if [ -z "$HOST" ]; then
+  echo "SETTLEFLOW_HOST is not set." >&2
+  echo "  export SETTLEFLOW_HOST=root@your.server   (or create scripts/.deploy.env)" >&2
+  exit 2
+fi
 
 step() { printf '\n== %s\n' "$1"; }
 die()  { printf '\nFAIL: %s\n' "$1" >&2; exit 1; }

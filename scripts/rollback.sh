@@ -11,7 +11,18 @@
 # docs/COMPLETION.md.
 set -uo pipefail
 
-HOST="${SETTLEFLOW_HOST:-root@13.140.59.39}"
+_HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+[ -f "$_HERE/.deploy.env" ] && . "$_HERE/.deploy.env"
+
+# Same rule as deploy.sh: the origin host is never hardcoded in this public repo.
+HOST="${SETTLEFLOW_HOST:-}"
+if [ -z "$HOST" ]; then
+  echo "SETTLEFLOW_HOST is not set." >&2
+  echo "  export SETTLEFLOW_HOST=root@your.server   (or create scripts/.deploy.env)" >&2
+  exit 2
+fi
+
 REMOTE_DIR="${SETTLEFLOW_REMOTE_DIR:-/opt/settleflow}"
 BACKUP_DIR="${REMOTE_DIR}-backups"
 UNIT="${SETTLEFLOW_UNIT:-settleflow}"
@@ -22,7 +33,7 @@ die() { printf '\nFAIL: %s\n' "$1" >&2; exit 1; }
 if [ "${1:-}" = "--list" ] || [ -z "${1:-}" ]; then
   echo "available backups on $HOST:"
   ssh -o BatchMode=yes "$HOST" "ls -1t $BACKUP_DIR/*.tar.gz 2>/dev/null || echo '  (none)'"
-  [ -n "${1:-}" ] || exit 0
+  exit 0
 fi
 
 TARGET="$1"
@@ -69,9 +80,21 @@ case "$HEALTH" in
 esac
 
 echo "canary after rollback:"
-ssh -o BatchMode=yes "$HOST" \
-  "cd $REMOTE_DIR && .venv/bin/python scripts/canary.py --base http://127.0.0.1:$LOCAL_PORT" \
-  || die "rolled back but the canary fails — service is up and not reconciling"
+# Validate with the NEWEST canary, not the copy inside the restored archive. Rolling
+# the test tool back together with the app is how a drill passes while the release it
+# restored is broken: the old release and the old canary share the same blind spot.
+# The canary from the pre-rollback snapshot (i.e. what was live a moment ago) is the
+# newest tool available, so it is the one that judges the restored code.
+ssh -o BatchMode=yes "$HOST" "
+  set -e
+  if tar tzf $BACKUP_DIR/pre-rollback-$NOW.tar.gz scripts/canary.py >/dev/null 2>&1; then
+    tar xzf $BACKUP_DIR/pre-rollback-$NOW.tar.gz -O scripts/canary.py > /tmp/settleflow-canary-current.py
+    cd $REMOTE_DIR && .venv/bin/python /tmp/settleflow-canary-current.py --base http://127.0.0.1:$LOCAL_PORT
+  else
+    echo '  (no newer canary in the pre-rollback snapshot; using the restored one)'
+    cd $REMOTE_DIR && .venv/bin/python scripts/canary.py --base http://127.0.0.1:$LOCAL_PORT
+  fi
+" || die "rolled back, but the newest canary fails against the restored release — this backup is not a good target; the pre-rollback archive is $BACKUP_DIR/pre-rollback-$NOW.tar.gz"
 
 echo
 echo "rollback to $TARGET complete and verified"

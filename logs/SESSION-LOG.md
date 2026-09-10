@@ -230,7 +230,7 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
 - **Model:** deepseek-v4-flash-vision-exp. Provider: opencode-go.
 - **Did:** Sanjay: "i already have a domain na. can u use that or what?" — yes, and did.
   Loaded the cloudflare-vps-deploy pattern (CF Tunnel -> VPS localhost). Probed the VPS
-  (root@148.113.6.63:20065: Ubuntu 24.04.4, Docker 29.7.2, cloudflared). The existing
+  (root@<vps-host>:<port>: Ubuntu 24.04.4, Docker 29.7.2, cloudflared). The existing
   `atlasnex-vps` tunnel already maps trade-ui -> 127.0.0.1:8091, so chose host port **8093**
   + subdomain **settleflow.atlasnex.com**; set docker-compose.yml to 8093. Shipped context
   to /opt/settleflow. `docker compose up -d --build` **FAILED** — this LXC has **no

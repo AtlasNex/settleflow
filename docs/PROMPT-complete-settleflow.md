@@ -10,7 +10,7 @@ Take the SettleFlow repo from "working engineering deployment" to a **launchable
 
 **Repo:** `E:/Sanjay Files/StartUp/open source/settleflow` (branch `master`, remote `https://github.com/AtlasNex/settleflow`)
 **Live:** `https://settleflow.atlasnex.com` (systemd host-run service `settleflow.service`, `127.0.0.1:8093`, Cloudflare Tunnel)
-**VPS:** `root@13.140.59.39` — deploy target is `/opt/settleflow`
+**VPS:** `<deploy-host>` (not committed — see `scripts/deploy.sh`; the origin address is deliberately absent from this public repo) — deploy target is `/opt/settleflow`
 
 **Established baseline, already verified — do not re-litigate:**
 - `python tests/test_matching.py` → **all 42 checks passed** (green; that's your regression gate).
