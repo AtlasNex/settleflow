@@ -8,8 +8,9 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Project root: `E:/Sanjay Files/StartUp/open source/settleflow`
 - Package: `settleflow/` (models.py, matching.py, parsers.py, exports.py,
   exceptions.py, schemas.py, pdf.py, ocr.py, `__main__.py` = CLI)
-- Tests: `tests/test_matching.py` (assert-based self-check, 42 checks) +
-  `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md)
+- Tests: `tests/test_matching.py` (assert-based self-check, 64 checks) +
+  `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md) and
+  `tests/fixtures/{phonepe,cashfree,payu,juspay}/` (synthetic rows on real verbatim headers)
 - SaaS: `saas/app.py` + `saas/templates/` + `saas/requirements.txt` + sample files
 - Docs: `docs/` (architecture, constraints, flow, decisions, bug, feature, rollback,
   testing, monetization, commercial, handover)
@@ -30,6 +31,28 @@ project). Semantic target: two records being made to agree. Starter shortlist �
 (best fit), **Equinox**, **Parallax**, **Pulsar**, **Epoch**, **Syzygy**, plus Perigee/Alcyone/Vega.
 Full brief, the rename blast-radius checklist, and the do-not-decide-for-him rule are in
 `docs/PROMPT-continue-settleflow.md` §1. **Start here.**
+
+### Session 15 — the three unblocked gateway parsers are wired
+
+The 2026-09-11 research pass unblocked three gateway formats (D-33); all three are now wired,
+and the self-check went 52 -> 64 checks:
+
+- **Cashfree Settlement Recon** — `load_cashfree_recon_report()` reads BOTH sections of the
+  two-report file (14-col batches, marker line, 63-col events). The event section has no
+  debit/credit pair: direction is `Sale Type` applied to `Event Settlement Amount` (the money
+  movement), while `Event Amount` stays the gross. Netting the events must equal the batch
+  total — the fixture asserts it, and a mutation probe confirmed the assertion fails if the
+  flag is applied to the gross column (D-34).
+- **PayU** — `parse_payu_settlement_range` (UTR-level, so rows level-1 match) and
+  `parse_payu_transaction_details` (signed per-transaction ReconLines). The CSV export can
+  never be wired: the merchant picks its columns per report (D-35).
+- **Juspay** — `load_juspay_settlement_csv()` nets per bank credit for both real variants.
+  Three assumptions are stated in the docstring rather than hidden: the rupee unit
+  (vendor-code corroboration), one-date-is-one-credit for the variant with no UTR column, and
+  the `Settled`-only status filter. **Nothing has been checked against a real file** (D-36).
+
+**No deploy and no version bump:** the change is library-level and `saas/app.py`'s own column
+detection is untouched, so the live service is unchanged at 0.7.3.
 
 ### Session 14 — hosted layer hardened, repo published, v0.7.3 shipped
 

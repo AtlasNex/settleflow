@@ -396,3 +396,59 @@ Epoch, Syzygy) and the full rename blast-radius list are in
 Repo `7344c30`, in sync with origin, working tree clean, **PUBLIC** (MIT), release `v0.7.3`.
 No background processes or orphaned listeners left on the laptop; VPS services
 (`settleflow`, `s1-capital-map`, `nextrade-terminal`, `cloudflared`) all active.
+
+## Session 15 — 2026-09-11 — the three unblocked gateway parsers wired
+
+Sanjay: *"Continue working on Settleflow."* Baseline checked before touching anything:
+`python tests/test_matching.py` -> all 52 checks passed, and
+`python scripts/canary.py --base https://settleflow.atlasnex.com` -> 5/5 PASS on v0.7.3.
+
+**Shipped** (self-check 52 -> 64 checks; zero-dependency core still green):
+
+| Vendor | What landed | Evidence |
+|---|---|---|
+| Cashfree | `load_cashfree_recon_report()` reads both sections of the two-report file (14-col batches / marker / 63-col events); `split_cashfree_recon_report()` raises without the marker | `tests/fixtures/cashfree/settlement_recon_synthetic.csv` -> 2 batches, 3 lines, batch total == netted event total (5881.12) |
+| PayU | `parse_payu_settlement_range` (UTR-level -> `Settlement`) and `parse_payu_transaction_details` (signed -> `ReconLine`), both fail-closed | `tests/fixtures/payu/*.json`, incl. a `match()` run that pairs both settlements to bank lines at `MatchStatus.EXACT` |
+| Juspay | `load_juspay_settlement_csv()` nets per bank credit for both real variants (documented 25-col; the `UTR Number` variant Juspay's own parser reads) | `tests/fixtures/juspay/*.csv` -> 1296.93 by date, 897.64 by UTR |
+
+Also: `ReconColumnMap` gained `direction_col` / `direction_amount_col`, and the two CSV row
+builders were split out of `load_csv` / `load_recon_csv` so a multi-section file can reuse one
+map per section instead of duplicating the loop.
+
+**The bug the fixture caught, worth remembering.** Cashfree's event section has no debit/credit
+column pair, so direction comes from `Sale Type`. The first implementation applied that flag to
+`Event Amount` (the gross). Netting the event section then missed the batch section's total by
+exactly the fees — 5900.00 against 5881.12. Credit/debit have to carry the money MOVEMENT
+(`Event Settlement Amount`, printed negative on a refund); `amount` stays the gross. Fixed with a
+separate `direction_amount_col`. The assertion that catches a regression is the fixture's
+"batch total == netted event total", and it was **mutation-probed**: swapping the column makes it
+fail, so the check is known to be sensitive rather than merely green.
+
+**PayU's CSV is un-wireable by design, not un-found.** Their export lets the merchant pick the
+columns per report, so no fixed public header can exist — every earlier "no sample file found"
+conclusion was right by outcome and wrong by reasoning, and that is what sent the previous
+session searching again. Recorded as D-35.
+
+**Juspay is wired with its limits written down.** Three assumptions are named in the loader
+docstring and in SCHEMAS.md instead of being hidden: the rupee unit (the docs say only
+"Integer"; Juspay's own production parser reads rupee decimals), one `Settlement Date` being one
+bank credit for the variant with no UTR column, and the `Settled`-only status filter. No real
+populated Juspay file has been seen — a Juspay run needs review until one and its bank credit
+agree (D-36).
+
+**Fixtures.** Synthetic rows on real verbatim headers (D-19), with a NOTICE.md per vendor. The
+real Cashfree and PhonePe exports were deliberately NOT vendored: they carry a named merchant's
+UTRs and order references. Juspay's column names came from AGPL-3.0 vendor code — names
+transcribed, no code copied.
+
+**Commits:** `22db550` (parsers + fixtures + tests), `d022dec` (SCHEMAS.md, incl. the 63-not-48
+column correction), `fd2c538` (DECISIONS D-34/D-35/D-36), plus the handover and this log entry.
+
+**Not deployed, no version bump:** the change is library-level and `saas/app.py`'s own column
+detection is untouched, so the live service is unchanged on 0.7.3. A release tag is a separate
+call for Sanjay.
+
+**Still open (unchanged by this session):** IDFC statements (no real public sample exists — the
+gate held), Cashfree's plain settlements report (no public column table; use its JSON API),
+PhonePe's per-settlement aggregate still unjoined to a real bank credit, and Sanjay's product
+NAME decision (`PROMPT-continue-settleflow.md` §1).
