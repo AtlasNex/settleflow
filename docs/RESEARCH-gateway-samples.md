@@ -100,12 +100,24 @@ Everything below is about not doing that.
 
 ## Search log — queries that returned nothing useful
 
-GitHub code search (`gh api search/code` — note: `gh search code` with the current token
-returns `[]` silently because the keyring token lacks the `read:user` scope grant needed
-for code search; the REST endpoint works):
+GitHub code search (`gh api search/code`):
+**Correction (re-tested 2026-09-11, and the original claim in this line was wrong):** an earlier
+draft of this document stated that `gh search code` returns `[]` silently "because the keyring token
+lacks the `read:user` scope". That is **not** the mechanism — with the same token, `gh search code`
+returns hits for `'BankReferenceNo'`, `'PhonePeReferenceId'`, `'Merchant_Settlement_Report'` and
+`'AXNPN'`. What actually happened is query semantics, reproduced exactly:
+`gh api -f q='cashfree settlement csv parser'` (terms, ANDed) → **122** results, while
+`q='"cashfree settlement csv parser"'` (a literal phrase) → **0**. The empty CLI result was a
+multi-word query matching no literal phrase; the big REST number was the words being ANDed.
+**So an empty code-search result is never evidence of absence, and a large REST count is not
+evidence the CLI broke — check whether the query was a phrase before concluding a format does not
+exist.** Misreading an empty search as "nothing is out there" is exactly the error D-24 made and
+this document exists to correct.
 - `"Event Settlement Amount" "Merchant Reference ID"` → 1 hit (the sabrang file, useful) but
-- `cashfree settlement csv parser` / `PhonePeReferenceId` / `cashfree_order_id settlement` /
-  `payu settlement csv parser` / `juspay settlement` (broad `gh search code` variants) → `[]` (scope bug)
+- `cashfree settlement csv parser` / `cashfree_order_id settlement` /
+  `payu settlement csv parser` / `juspay settlement` (broad `gh search code` variants) → `[]`
+  — these were literal-phrase misses, not a tool fault (see the correction above; the REST
+  endpoint ANDs the same words and returns 122/… hits)
 - `"SS Adjustment Type" "Settlement Status"` → 0 (only in docs sites, not code)
 - `juspay settlement path:*.csv`, `payu settlement path:*.csv`, `idfc statement path:*.csv`,
   `path:*.csv "CashFree Reference Id"`, `path:*.csv "Merchant_Settlement_Report"`,
