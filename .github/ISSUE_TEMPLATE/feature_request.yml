@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose a new parser, export, matching improvement, or CLI/API change.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two constraints shape what gets merged here (see `docs/CONSTRAINTS.md`):
+        the core must stay **stdlib-only**, and vendor formats must be based on
+        **real samples or official docs — never guesses**. A request that
+        already attaches a redacted sample file gets merged dramatically faster.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of feature?
+      options:
+        - New gateway parser (settlements/recon)
+        - New bank statement parser (CSV)
+        - New bank PDF layout
+        - New export format
+        - Matching-engine improvement
+        - CLI / API ergonomics
+        - SaaS layer
+        - Docs / examples
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem in one paragraph
+      description: What can't you do today, and what do you do instead? Real workflows beat hypothetical ones.
+      placeholder: |
+        Our clients on Paytm settlements have to convert to Razorpay-shaped
+        CSV by hand before running the CLI...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Function/CLI shape, expected output columns, edge cases. Sketch code if you like.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Real sample or official docs
+      description: |
+        For parser requests: paste a redacted header + 2–3 rows, or link the
+        vendor's format documentation. This is near-mandatory — unverified
+        schemas will not be implemented (CONSTRAINTS.md #2). Redact account
+        numbers, UTRs, and amounts; keep the formats.
+  - type: dropdown
+    id: willing-pr
+    attributes:
+      label: Would you build it?
+      options:
+        - "Yes — assign me"
+        - "Would with guidance"
+        - "No — proposing only"
+  - type: markdown
+    attributes:
+      value: |
+        Maintainer note: features needing a new third-party runtime dependency
+        in the core will be declined or moved to an optional extra.

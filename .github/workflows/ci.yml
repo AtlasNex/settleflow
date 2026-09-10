@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  self-check:
+    # The repo's single runnable check: assert-based, no test framework
+    # (docs/CONSTRAINTS.md #8). Exit 0 = green. Needs nothing installed: the
+    # PDF/OCR checks skip themselves when the optional extras are absent.
+    name: Self-check (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run self-check
+        run: python tests/test_matching.py
+
+  zero-dependency-core:
+    # Enforces the claim in README and docs/CONSTRAINTS.md #6: the core library
+    # has ZERO runtime dependencies. Nothing is installed in this job, so a stray
+    # third-party import anywhere in settleflow/ fails here.
+    name: Zero-dependency core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Assert settleflow imports only the standard library
+        run: python tests/test_zero_dependency_core.py
+
+  saas-integration:
+    # The check that matters most for the hosted layer: boot the real app and run
+    # the end-to-end canary against it — upload, private run URL, tally export,
+    # the leak paths still closed, and run responses still no-store. A green boot
+    # with a broken reconcile is exactly the failure a health check cannot see.
+    name: SaaS integration (boot + canary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the SaaS extra
+        run: pip install ".[saas]"
+      - name: Boot the app
+        run: |
+          python -m uvicorn saas.app:app --host 127.0.0.1 --port 8093 --log-level warning &
+          for _ in $(seq 1 20); do
+            if curl -sf -o /dev/null http://127.0.0.1:8093/health; then
+              echo "app is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "app never became healthy"; exit 1
+      - name: Run the end-to-end canary
+        run: python scripts/canary.py --base http://127.0.0.1:8093
+
+  legal-pages-present:
+    # The app serves /privacy, /terms and /refund from docs/legal/*.md. If someone
+    # reorganises docs/, the pages silently turn into 404s, so assert the files are
+    # both present and non-trivial.
+    name: Legal drafts present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/legal
+        run: |
+          for f in PRIVACY.md TERMS.md REFUND.md; do
+            test -s "docs/legal/$f" || { echo "docs/legal/$f missing or empty"; exit 1; }
+            lines=$(wc -l < "docs/legal/$f")
+            [ "$lines" -ge 20 ] || { echo "docs/legal/$f is only $lines lines"; exit 1; }
+            echo "docs/legal/$f: $lines lines"
+          done
