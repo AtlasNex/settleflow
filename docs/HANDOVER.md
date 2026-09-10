@@ -19,7 +19,19 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 ## Current state (2026-09-11)
 
-### Session 14 — hosted layer hardened, repo published
+### ⚠️ OPEN THREAD — Sanjay asked for the product NAME and the session ended before answering
+
+> *"think of names from space, like how OpenAI and Anthropic names their products, also we have
+> similar projects Nova and brand new one Kessler."*
+
+`settleflow` is still the documented placeholder (`CONSTRAINTS.md` #10 forbids renaming without a
+traceable diff + a `DECISIONS.md` entry). Family register: **Nova** (geospatial), **Kessler** (new
+project). Semantic target: two records being made to agree. Starter shortlist — **Conjunction**
+(best fit), **Equinox**, **Parallax**, **Pulsar**, **Epoch**, **Syzygy**, plus Perigee/Alcyone/Vega.
+Full brief, the rename blast-radius checklist, and the do-not-decide-for-him rule are in
+`docs/PROMPT-continue-settleflow.md` §1. **Start here.**
+
+### Session 14 — hosted layer hardened, repo published, v0.7.3 shipped
 
 **The headline risk is closed.** The thin SaaS had a public `/runs` listing and
 integer-id `/runs/<id>/export/*.csv` downloads: every uploaded statement's matched UTRs,
@@ -103,6 +115,9 @@ parse_sbi_pdf("statement.pdf")           # SBI YONO / netbanking / credit card
 
 ## What is next
 
+0. **Name the product** (Sanjay's outstanding request — see the OPEN THREAD block above). Then the
+   rename is a real diff across `pyproject.toml`, the `settleflow/` package dir, README, MASTER-PLAN,
+   all `docs/`, the CLI entry point, the live copy, and the VPS service name — plan it, don't improvise it.
 1. **Gateway parsers** — PhonePe settlement is **wired** (`load_phonepe_settlement_csv`, and it is
    the one case where the file shape differs from ours: rows are per-transaction, so they net per
    `BankReferenceNo`). Still to build, all specified with verbatim sources in

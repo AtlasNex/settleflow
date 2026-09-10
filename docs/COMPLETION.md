@@ -110,3 +110,53 @@ the owner can supply) · **SKIPPED** (deliberately not done).
 - **Email delivery of the workpaper pack** — blocked on Proton SMTP credentials.
 - **Cloudflare managed-robots.txt** — a zone-level policy change, left to the owner.
 - **uptime-kuma monitor** — needs the kuma login.
+
+---
+
+## Appendix: verification pass and late findings (end of session)
+
+Added after the main record above, when the closeout verification was run.
+
+### Re-verified at the final revision (`7344c30`)
+
+| Check | Command | Result |
+|---|---|---|
+| Canonical self-check | `python tests/test_matching.py` | **52/52** |
+| Zero-dependency core | `python tests/test_zero_dependency_core.py` | PASS, 24 modules all stdlib |
+| Local battery | `bash run.sh` (unpiped) | **pass=40 fail=0**, exit 0 |
+| Concurrency regression | `bash race.sh` | 12 issued / 12 tokens / **0 cross-contamination** |
+| Recipe verify | `hermes verify --skip-start --json` | `ok: true`, manifest, bootstrap+test exit 0 |
+| CI | `gh run list` | **success**, 6/6 jobs |
+| Live | `scripts/canary.py --base https://settleflow.atlasnex.com` | **5/5 PASS** |
+
+### Late findings
+
+7. **A stale process can make a *later* verification pass.** A `hermes verify` full run left an orphan
+   `uvicorn` on port 8000 (its command line matched the manifest's `start` string verbatim; created
+   inside a subagent's execution window). It answered `/health` **200** while `POST /reconcile` returned
+   **500** — so any readiness poll, or my own first canary run, was testing a broken *old* process
+   rather than the current code. Isolated by checking which PID actually held the port and reading its
+   `CommandLine` + `CreationDate`, then re-proving the current revision green on the same port.
+   **Rule: before trusting a readiness result, check what is listening.**
+8. **A verification result is only as trustworthy as its plumbing.** Running a check script piped into
+   `tail` reported "exit code 0" for a run that printed `fail=3` and internally exited 1, because a
+   pipeline returns the *last* command's status. The same session found a concurrency test whose three
+   "failures" were the harness (12 shells appending to one file on MSYS silently drop lines — 5 of 12
+   survived), not the code. **A red result needs the harness ruled out before the code is accused, and
+   a green result needs its exit code to be real.**
+9. **A subagent's stated mechanism was wrong, and it was the same error the work existed to fix.** Its
+   research report recorded `gh search code` returning `[]` "because the token lacks `read:user`".
+   Re-testing disproved it — the same token returns hits — and reproduced the true cause:
+   `gh api -f q='… csv parser'` (terms ANDed) → 122, vs `q='"… csv parser"'` (literal phrase) → 0.
+   An empty result was read as a permission failure, which is structurally identical to D-24 reading
+   empty searches as proof that four gateway formats were unobtainable. Corrected in
+   `docs/RESEARCH-gateway-samples.md`; the rule now lives in the `research-source-access` skill.
+   **Self-reports are hypotheses, including from subagents — verify before recording.**
+
+### Also closed after the main record
+
+- **PhonePe settlement wired** (`load_phonepe_settlement_csv`) — with the per-settlement netting the
+  file shape requires, and the single unverified gap named in the docstring (the aggregate has never
+  been compared to a real bank credit). Two new checks; 50 → 52.
+- **D-33** recorded: D-24's "merchant-private" conclusion was wrong for four of five targets, and the
+  PayU search had been aimed at a CSV that structurally cannot exist.

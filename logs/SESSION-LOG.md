@@ -325,3 +325,74 @@ Append-only trail. One entry per working session, newest at the bottom. Tag mode
   guessed schema is forbidden and is how silently wrong ledgers get made), PyPI (no account/token),
   workpaper email delivery (Proton SMTP creds), Cloudflare managed-robots.txt (zone policy),
   uptime-kuma monitor (no login). Each is named in COMPLETION.md with what would unblock it.
+
+## 2026-09-11 — Session 14 CLOSEOUT ADDENDUM (post-mid-session state)
+
+The Session 14 entry above was written mid-session. This addendum records what happened after it,
+so the log matches the shipped state. Final revision at close: **`7344c30`** (13 commits in session).
+
+- **PhonePe settlement is WIRED** (`load_phonepe_settlement_csv`). The research subagent proved
+  `load_csv(file, utr_col="BankReferenceNo", amount_col="Amount", date_col="SettlementDate")` reads a real
+  merchant export (418 rows). But a map alone would have been *harmful*: PhonePe's report is one row per
+  transaction while a bank credit is one per settlement, so the rows are netted
+  (`Amount + Fee + IGST + CGST + SGST`) per `BankReferenceNo` before the matcher sees them — otherwise it
+  is a wall of false unmatched rows and the (amount, date) fallback can pair the wrong ones. Two new
+  checks cover it (aggregation + a malformed date raising a named ValueError). **Caveat kept in the
+  docstring: the aggregate has never been compared against a real bank credit.**
+- **Corrected a wrong claim made by the research subagent** — and this one matters more than it looks.
+  Its report stated `gh search code` returns `[]` silently because the token lacks `read:user`. Re-tested:
+  **false.** The same token returns hits for `BankReferenceNo`, `PhonePeReferenceId`,
+  `Merchant_Settlement_Report`, `AXNPN`. Real mechanism, reproduced exactly:
+  `gh api -f q='cashfree settlement csv parser'` (terms ANDed) → **122**, vs
+  `q='"cashfree settlement csv parser"'` (literal phrase) → **0**. It read its own phrase-miss as a
+  permissions bug. Fixed in `docs/RESEARCH-gateway-samples.md`, and the rule recorded in the
+  `research-source-access` skill: **an empty code-search result is never evidence of absence** — that is
+  exactly the error D-24 made, and it gated the parser work for weeks.
+- **Decisions added:** D-29 (capability-URL access model), D-30 (no-store + the CF cache finding),
+  D-31 (origin host never committed), D-32 (canary must do a real reconcile), D-33 (D-24 was partly
+  wrong; a negative result expires).
+- **Delivered and pushed:** `scripts/deploy.sh`, `scripts/rollback.sh`, `scripts/canary.py`,
+  `tests/test_zero_dependency_core.py`, `.gitattributes`, `docs/COMPLETION.md`,
+  `docs/RESEARCH-gateway-samples.md`, `brand-context.md`, `docs/legal/*`, CONTRIBUTING/SECURITY,
+  `.github/` templates + CI, README rewrite, and the two prompt docs.
+
+### Verification at close (all re-run, unpiped)
+
+| Check | Result |
+|---|---|
+| `python tests/test_matching.py` | **52/52 passed** (was 42 at session start) |
+| `python tests/test_zero_dependency_core.py` | PASS (24 modules, all stdlib) |
+| 40-check local battery (input bounds, leak paths, lead capture) | **40 pass / 0 fail** |
+| 12-way concurrent-upload regression | 12 requests → 12 distinct tokens → **0 cross-contamination** |
+| `hermes verify --skip-start --json` | `ok: true`, source=manifest, bootstrap exit 0, test exit 0 |
+| GitHub CI | **6/6 jobs success** |
+| Live canary (public URL) | **5/5 PASS** |
+| `/health` | `{"status":"ok","version":"0.7.3","runs":56,"retention_days":30}` |
+
+### Two process-level findings from the verification pass
+
+1. **A `hermes verify` FULL run left an orphan `uvicorn` holding port 8000** — its command line matched
+   the manifest's `start` string verbatim and it was created inside the repo-hygiene subagent's execution
+   window. It answered `/health` with **200** while `POST /reconcile` returned **500**: a liveness check
+   passing against a broken *stale* process. My first canary run hit that orphan, not my code; I isolated
+   it (killed the listener, re-booted the current revision on the same port) and re-proved 5/5. The
+   `hermes-verify` skill now records both the orphan hazard and the "kill the listener PID, not the
+   wrapper" rule.
+2. **Piping a verification script through `tail` masks its exit code.** A run that printed `fail=3` and
+   internally exited 1 was reported as "exit code 0" — the pipeline returns the last command's status.
+   Re-ran unpiped so the exit code means something.
+
+### Open thread carried forward (Sanjay's outstanding request)
+
+He asked for the **product name**: *"think of names from space, like how OpenAI and Anthropic names their
+products, also we have similar projects Nova and brand new one Kessler."* The session ended before this
+was answered. `settleflow` remains the documented placeholder (`CONSTRAINTS.md` #10 forbids renaming
+without a diff + `DECISIONS.md` entry). A starter shortlist (Conjunction, Equinox, Parallax, Pulsar,
+Epoch, Syzygy) and the full rename blast-radius list are in
+`docs/PROMPT-continue-settleflow.md` §1. **He chooses the name — present finalists, do not decide.**
+
+### State at close
+
+Repo `7344c30`, in sync with origin, working tree clean, **PUBLIC** (MIT), release `v0.7.3`.
+No background processes or orphaned listeners left on the laptop; VPS services
+(`settleflow`, `s1-capital-map`, `nextrade-terminal`, `cloudflared`) all active.
