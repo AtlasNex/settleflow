@@ -119,6 +119,29 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def _no_store_private_paths(request: Request, call_next):
+    """Never let a shared cache hold a run's data.
+
+    Found the hard way on 11 Sep: the app stopped serving /runs/<id>/export/*.csv,
+    but Cloudflare had already cached that `text/csv` at the edge (csv is in CF's
+    default cacheable-extension list) and kept serving the leaked workpaper with
+    cf-cache-status: HIT for the rest of its 4-hour TTL. Removing a route does not
+    un-publish what the CDN already holds.
+
+    A run URL is a bearer credential, so its response must be no-store everywhere:
+    browser, proxy, or edge. /health is included because a cached health check is
+    the "process is up" illusion this project keeps getting bitten by.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if (path.startswith("/r/") or path == "/reconcile"
+            or path == "/health" or path.endswith("/notify")):
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Storage
 # ---------------------------------------------------------------------------
