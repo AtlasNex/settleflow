@@ -413,3 +413,55 @@ survived because the OSS component layer is genuinely un-owned.
 - **Also decided:** the real files must not be vendored (they carry a named merchant's real UTRs);
   fixtures are regenerated from the real header with invented values, as D-19 did for banks.
 - **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-34: The Cashfree recon file is read whole — two sections, two maps, and the flag applies to the SETTLEMENT amount
+- **Why:** the export is literally two reports concatenated: a 14-column batch section, the marker
+  line `** Settlement Reconciliation Details **`, then a 63-column event section. Reading either
+  through the other's map states wrong money confidently, so `load_cashfree_recon_report()` splits
+  on the marker first and raises when it is absent.
+- **The non-obvious part, and the bug it produced:** the event section has no debit/credit pair.
+  Direction comes from `Sale Type ∈ {CREDIT, DEBIT}` and the amount it applies to must be
+  `Event Settlement Amount` — the money movement, net of the fee/tax columns beside it and printed
+  NEGATIVE on a refund — while `Event Amount` is the gross. The first implementation applied the
+  flag to the gross, so netting the event section did not equal the batch total: it was out by
+  exactly the fees (5900.00 vs 5881.12 on the fixture). The fix is a separate
+  `direction_amount_col`; the check that catches a regression is the fixture assertion that the
+  netted event total equals the batch total, which is verified to fail when the column is wrong.
+- **Also decided:** the movement is taken as a magnitude and the flag sets the side, so a vendor
+  printing a refund as `-100.00` and one printing it `100.00` land identically; and the `UTR` is
+  both the line's settlement_utr and its batch key, because the event section carries no batch id.
+- **Consequence:** `cashfree_recon_csv` (63 cols) and `cashfree_settlement_csv` (14 cols) are both
+  filled, replacing two `None` placeholders.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-35: PayU's settlement CSV is closed as un-wireable BY DESIGN; the two APIs are the surface
+- **Why:** PayU's own docs say the export's columns are chosen per report in a dashboard dialog, so
+  no fixed public header can exist. Every earlier "no sample file found" conclusion about PayU was
+  right in outcome and wrong in reasoning — the search could not have succeeded, and recording it
+  as a search gap is what made the next session search again.
+- **Instead:** `parse_payu_settlement_range` (UTR-level → `Settlement`: `settlementAmount` is the
+  net credited to the merchant's bank account and `utrNumber` is the bank reference, so these rows
+  reach `match()` at level 1 rather than through the amount+date fallback) and
+  `parse_payu_transaction_details` (per transaction → `ReconLine`; `settlementAmount` arrives as a
+  JSON number and SIGNED, so the magnitude goes to `amount` and the sign to debit/credit).
+- **Fail-closed, deliberately:** PayU's `status: 1` envelope raises with PayU's own message, and an
+  unknown field raises. A vendor adding a field is a schema change, and ignoring it silently is how
+  a reconciler ships wrong numbers after a release nobody connected to the vendor.
+- **Rejected:** leaving `payu_settlement_csv` open "awaiting a sample". It can never be filled.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-36: Juspay is wired with its limits written into the loader, not left awaiting a perfect file
+- **Why:** the 25-column schema is officially documented and Juspay's own production parser names
+  the columns it reads, so refusing to build would preserve the blocker, not the correctness.
+  Nothing here is guessed: every column name is transcribed from one of those two sources.
+- **What is still NOT verified, stated in the loader docstring and in SCHEMAS.md:** the money unit
+  (the docs say only "Integer" while Juspay's own parser reads plain rupee decimals → rupees, a
+  corroboration rather than a documented fact); one `Settlement Date` being one bank credit for the
+  documented variant, which has neither a batch id nor a UTR column to key on; and the status
+  filter (only `Settled` means funds reached the bank).
+- **Consequence:** a Juspay reconciliation is a run that needs review until a real file and its
+  matching bank credit agree. An unrecognised `Settlement Status` raises instead of being silently
+  included or dropped, because a row filtered out by a guess is an error nobody ever sees.
+- **Rejected:** a `juspay_recon_csv` map from the HyperPG column set. It has no real file behind it
+  either, and two speculative maps is twice the unverified surface with none of the evidence.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
