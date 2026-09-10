@@ -1,0 +1,21 @@
+# Line endings are pinned deliberately.
+#
+# scripts/deploy.sh ships this repo to a Linux host over tar. On Windows git,
+# core.autocrlf=true silently converts the working tree to CRLF, so a fresh clone
+# on the wrong machine would deploy CRLF shell scripts and the server would fail
+# with "bad interpreter: /usr/bin/env bash^M" — at deploy time, on the box, which
+# is the worst moment to discover it. Pinning LF here removes the machine's git
+# config from the deploy path.
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Fixtures are real statement text: never touch their bytes or line endings.
+*.png binary
+*.pdf binary
+tests/fixtures/** -text
