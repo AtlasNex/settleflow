@@ -1,4 +1,5 @@
 """Self-check for the library. Run: python tests/test_matching.py"""
+import contextlib
 import sys
 import tempfile
 from datetime import date, datetime, timedelta, timezone
@@ -21,6 +22,7 @@ from helpers import (  # noqa: E402
 )
 
 from settleflow import (
+    CASHFREE_RECON_MARKER,
     MatchStatus,
     Txn,
     PdfEncryptedError,
@@ -34,12 +36,17 @@ from settleflow import (
     extract_pdf_text,
     group_batches,
     load_bank_statement,
+    load_cashfree_recon_report,
+    load_juspay_settlement_csv,
+    load_payu_json,
     load_phonepe_settlement_csv,
     load_settlement_csv,
     load_vendor_recon_csv,
     match,
     match_orders,
     match_settlements,
+    parse_payu_settlement_range,
+    parse_payu_transaction_details,
     parse_razorpay_recon,
     parse_razorpay_settlements,
     parse_sbi_statement,
@@ -915,6 +922,291 @@ def test_phonepe_settlement_report_rejects_a_bad_date_loudly():
         assert "AXNPNTESTUTR0009" in str(exc), exc
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def _temp_text(text, suffix=".csv"):
+    """Write text to a temp file for a trust-boundary check; always cleaned up."""
+    with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False,
+                                     encoding="utf-8", newline="") as fh:
+        fh.write(text)
+        path = fh.name
+    try:
+        yield path
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def _temp_assert(failure_message):
+    """Fail the check unless the wrapped block raises ValueError."""
+    try:
+        yield
+    except ValueError:
+        return
+    raise AssertionError(failure_message)
+
+
+# ---- Cashfree Settlement Recon (two reports in one file) ----
+
+_CF_RECON_FIXTURE = (Path(__file__).resolve().parent / "fixtures" / "cashfree"
+                     / "settlement_recon_synthetic.csv")
+
+
+def _cf_two_section(batch_rows: str, event_rows: str) -> str:
+    """A minimal Cashfree recon file: batch header, marker, event header."""
+    return (
+        "Id,UTR No.,Net Settlement Amount,Settlement Date\n"
+        f"{batch_rows}"
+        f"{CASHFREE_RECON_MARKER}\n"
+        "Event Id,Event Type,Sale Type,Event Amount,Event Settlement Amount,"
+        "Event Time,UTR,Merchant Reference Id\n"
+        f"{event_rows}"
+    )
+
+
+def test_cashfree_recon_report_reads_both_sections_and_they_reconcile():
+    # The report is two reports concatenated: 14-column settlement batches, a
+    # marker line, then 63-column per-event rows. Both sections are asserted,
+    # and the assertion that matters is the last one: netting the event section
+    # (the `Sale Type` flag applied to `Event Settlement Amount`, which Cashfree
+    # prints NEGATIVE on a refund) must reproduce the batch section's Net
+    # Settlement Amount total. Applying the flag to the gross `Event Amount`
+    # instead — the obvious first implementation — fails exactly here, because
+    # then the fee on every payment is lost.
+    batches, lines = load_cashfree_recon_report(str(_CF_RECON_FIXTURE))
+
+    assert len(batches) == 2, [(t.utr, str(t.amount)) for t in batches]
+    first, second = batches
+    assert first.utr == "AXNCFTESTUTR0001", first.utr
+    assert first.amount == Decimal("4890.56"), first.amount
+    assert first.txn_date == date(2025, 10, 13), first.txn_date
+    assert first.ref == "SETTLETEST001", first.ref
+    assert second.utr == "AXNCFTESTUTR0002", second.utr
+    assert second.amount == Decimal("990.56"), second.amount
+    assert second.txn_date == date(2025, 10, 14), second.txn_date
+
+    assert len(lines) == 3, [(l.entity_id, l.type) for l in lines]
+    payment, refund, other = lines
+    assert payment.type == "payment" and payment.entity_id == "EVT-TEST-0001", payment
+    assert payment.credit == Decimal("4990.56"), payment.credit   # net of fee/tax
+    assert payment.debit == Decimal("0"), payment.debit
+    assert payment.amount == Decimal("5000.00"), payment.amount   # gross stays gross
+    assert payment.fee == Decimal("8.00"), payment.fee
+    assert payment.tax == Decimal("1.44"), payment.tax
+    assert payment.currency == "INR", payment.currency
+    assert payment.created_at == date(2025, 10, 12), payment.created_at
+    assert payment.order_id == "ORDER-TEST-1001", payment.order_id
+    assert payment.settlement_utr == "AXNCFTESTUTR0001", payment.settlement_utr
+    assert refund.type == "refund", refund.type
+    assert refund.debit == Decimal("100.00"), refund.debit         # magnitude, not -100
+    assert refund.net == Decimal("-100.00"), refund.net
+    assert other.settlement_id == "AXNCFTESTUTR0002", other.settlement_id
+
+    line_total = sum((x.net for x in lines), Decimal("0"))
+    batch_total = sum((b.amount for b in batches), Decimal("0"))
+    assert line_total == batch_total == Decimal("5881.12"), (line_total, batch_total)
+
+
+def test_cashfree_recon_report_refuses_a_file_without_the_marker():
+    # Trust boundary: the two sections have different column maps, so without the
+    # marker there is no way to know which one a file is. It must raise rather
+    # than read the file as whichever section it resembles.
+    with _temp_text("Id,Total Transaction Amount\nSETTLETEST001,10.00\n") as path:
+        try:
+            load_cashfree_recon_report(path)
+            raise AssertionError("a file with no section marker was accepted")
+        except ValueError as exc:
+            assert "Settlement Reconciliation Details" in str(exc), exc
+
+
+def test_cashfree_recon_rejects_an_unknown_sale_type():
+    # Sale Type decides which side money lands on, so an unrecognised value must
+    # raise instead of being defaulted to one side: a guessed sign flips the
+    # direction of a real refund, which is worse than a loud failure.
+    raw = _cf_two_section(
+        "SETTLETEST001,AXNCFTESTUTR0001,10.00,2025-10-13\n",
+        "EVT-TEST-1,PAYMENT,SIDEways,10.00,9.80,2025-10-12 10:00:00,"
+        "AXNCFTESTUTR0001,ORDER-TEST-1\n",
+    )
+    with _temp_text(raw) as path:
+        try:
+            load_cashfree_recon_report(path)
+            raise AssertionError("an unknown Sale Type was accepted")
+        except ValueError as exc:
+            assert "SIDEways" in str(exc) and "CREDIT or DEBIT" in str(exc), exc
+
+
+# ---- PayU settlement APIs (no CSV exists: the export's columns are picked in ----
+# ---- the dashboard, so these two documented APIs are the integration surface) ----
+
+
+def test_payu_settlement_range_reads_utr_level_rows():
+    # Money arrives as rupee STRINGS here, and the row that reconciles against a
+    # bank credit is the UTR-level one: settlementAmount is the net that lands in
+    # the bank and utrNumber is the bank reference.
+    raw = load_payu_json(str(Path(__file__).resolve().parent / "fixtures" / "payu"
+                            / "settlement_range_synthetic.json"))
+    rows = parse_payu_settlement_range(raw)
+
+    assert len(rows) == 2, [r.settlement_id for r in rows]
+    first, second = rows
+    assert first.settlement_id == "SETTLETEST20251013001", first.settlement_id
+    assert first.utr == "TESTUTR0000000001", first.utr
+    assert first.amount == Decimal("4890.56"), first.amount
+    assert first.created_at == date(2025, 10, 13), first.created_at
+    assert first.fees == Decimal("8.00"), first.fees    # 0.0 service + 8.00 additional
+    assert first.tax == Decimal("1.44"), first.tax      # 0.0 service + 1.44 additional
+    assert second.utr == "TESTUTR0000000002", second.utr
+    # This row has the fees in the non-"additional" pair instead; both pairs are
+    # summed, so the total is the same shape either way.
+    assert second.fees == Decimal("8.00") and second.tax == Decimal("1.44"), second
+    assert isinstance(first.amount, Decimal), type(first.amount)
+
+
+def test_payu_settlement_range_matches_a_bank_credit_on_the_utr():
+    # The point of the UTR-level API: these rows reach match() at level 1 (exact
+    # UTR), not through the amount+date fallback that can pair the wrong rows.
+    raw = load_payu_json(str(Path(__file__).resolve().parent / "fixtures" / "payu"
+                            / "settlement_range_synthetic.json"))
+    settlements = parse_payu_settlement_range(raw)
+    settlement_txns = [
+        Txn(utr=s.utr, amount=s.amount, txn_date=s.created_at) for s in settlements
+    ]
+    bank = [
+        Txn(utr="TESTUTR0000000001", amount=Decimal("4890.56"),
+            txn_date=date(2025, 10, 13)),
+        Txn(utr="TESTUTR0000000002", amount=Decimal("990.56"),
+            txn_date=date(2025, 10, 14)),
+    ]
+
+    result = match(settlement_txns, bank)
+    assert len(result.matched) == 2, (len(result.matched), result.settlement_only)
+    assert all(m.status is MatchStatus.EXACT for m in result.matched), result.matched
+    assert not result.settlement_only and not result.bank_only
+
+
+def test_payu_settlement_range_fails_closed_on_a_failure_envelope():
+    # PayU answers with status 1 and a message; a parser that read result as data
+    # would report an empty run (or crash later) instead of the real reason.
+    with _temp_assert("status=1 envelope accepted"):
+        parse_payu_settlement_range(
+            {"status": 1, "message": "Unauthorized: Invalid signature", "result": None}
+        )
+
+
+def test_payu_settlement_range_refuses_an_unknown_field():
+    # D-7 in API form: PayU adding a field is a schema change, and quietly
+    # ignoring it is how a reconciler starts reporting wrong numbers after a
+    # vendor release. The documented field set is closed.
+    payload = {
+        "status": 0,
+        "result": {"page": 1, "size": 1, "totalCount": 1, "data": [{
+            "settlementId": "S1",
+            "settlementCompletedDate": "2025-10-13 02:51:22.000000",
+            "settlementAmount": "10.00",
+            "utrNumber": "TESTUTR0000000009",
+            "newUndocumentedField": "surprise",
+        }]},
+    }
+    with _temp_assert("an unknown PayU field was accepted"):
+        parse_payu_settlement_range(payload)
+
+
+def test_payu_transaction_details_signs_refunds_and_maps_status():
+    # settlementAmount is SIGNED here (refunds and chargebacks are negative) and
+    # the sign has to survive into debit/credit, or every refund reads as income.
+    # This endpoint also carries no currency field, and an unsettled transaction
+    # may have no UTR yet.
+    raw = load_payu_json(str(Path(__file__).resolve().parent / "fixtures" / "payu"
+                            / "transaction_details_synthetic.json"))
+    lines = parse_payu_transaction_details(raw)
+
+    assert len(lines) == 3, [(l.entity_id, l.type) for l in lines]
+    capture, refund, chargeback = lines
+    assert capture.type == "capture" and capture.credit == Decimal("990.56"), capture
+    assert capture.debit == Decimal("0"), capture.debit
+    assert capture.settled is True and capture.on_hold is False, capture
+    assert capture.settlement_utr == "TESTUTR0000000001", capture.settlement_utr
+    assert capture.currency == "INR", capture.currency
+    assert capture.created_at == date(2025, 10, 13), capture.created_at
+    assert refund.debit == Decimal("990.56") and refund.credit == Decimal("0"), refund
+    assert refund.net == Decimal("-990.56"), refund.net
+    assert chargeback.on_hold is True and chargeback.settled is False, chargeback
+    assert chargeback.settlement_utr is None, chargeback.settlement_utr
+    assert chargeback.amount == Decimal("50.0"), chargeback.amount
+
+
+def test_payu_transaction_details_requires_the_documented_keys():
+    with _temp_assert("a PayU transaction row missing its id was accepted"):
+        parse_payu_transaction_details({
+            "status": 0,
+            "result": [{"transactionType": "capture", "settlementAmount": 8.0}],
+        })
+
+
+# ---- Juspay settlement file (wired with its limits stated) ----
+
+
+def test_juspay_settlement_nets_per_bank_credit_both_variants():
+    # Juspay's file is per TRANSACTION (like PhonePe's), so rows must net into
+    # one Txn per bank credit before match() sees them. Both real shapes are
+    # covered: the documented 25-column schema, which has separate Credit/Debit
+    # columns and NO bank-UTR column, and the variant Juspay's own production
+    # parser reads, which carries UTR Number.
+    base = Path(__file__).resolve().parent / "fixtures" / "juspay"
+
+    documented = load_juspay_settlement_csv(
+        str(base / "settlement_docs_schema_synthetic.csv")
+    )
+    # Grouped by Settlement Date: 997.64 + 498.82 - 199.53. The Pending row on
+    # the 13th is skipped (no funds at the bank yet), so no second Txn appears.
+    assert len(documented) == 1, [(t.utr, str(t.amount)) for t in documented]
+    only = documented[0]
+    assert only.utr is None, only.utr          # the documented schema has no UTR
+    assert only.amount == Decimal("1296.93"), only.amount
+    assert only.txn_date == date(2025, 10, 12), only.txn_date
+    assert only.ref == "ORDER-TEST-1001", only.ref
+
+    variant = load_juspay_settlement_csv(
+        str(base / "settlement_utr_variant_synthetic.csv")
+    )
+    # Grouped by UTR Number: 997.64 - 100.00. The row with no UTR and the Pending
+    # row both drop out.
+    assert len(variant) == 1, [(t.utr, str(t.amount)) for t in variant]
+    v = variant[0]
+    assert v.utr == "TESTUTR0000000011", v.utr
+    assert v.amount == Decimal("897.64"), v.amount
+    assert v.txn_date == date(2025, 10, 12), v.txn_date
+
+
+def test_juspay_settlement_reads_a_partner_amount_file():
+    # A variant with no Credit/Debit pair: Partner Amount is the money movement.
+    # Refusing this file ("unknown variant") would be defensible, silently
+    # summing the wrong column would not — so it is parsed and asserted.
+    header = "Merchant ID,Partner Amount,Settlement Date,Order ID,Settlement Status\n"
+    rows = ("MERCHANT-TEST,100.00,12/10/2025,ORDER-TEST-1,Settled\n"
+            "MERCHANT-TEST,50.00,12/10/2025,ORDER-TEST-2,Settled\n")
+    with _temp_text(header + rows) as path:
+        txns = load_juspay_settlement_csv(path)
+    assert len(txns) == 1, [(t.utr, str(t.amount)) for t in txns]
+    assert txns[0].amount == Decimal("150.00"), txns[0].amount
+    assert txns[0].utr is None, txns[0].utr
+    assert txns[0].txn_date == date(2025, 10, 12), txns[0].txn_date
+
+
+def test_juspay_settlement_refuses_an_unknown_status():
+    # Only "Settled" means the funds reached the bank. A status Juspay adds later
+    # must not be silently included or silently dropped, so an unrecognised value
+    # raises with the file's own vocabulary named.
+    header = ("Merchant ID,Credit,Debit,Settlement Date,Settlement Status\n")
+    rows = "MERCHANT-TEST,100.00,0.00,12/10/2025,Partially Settled\n"
+    with _temp_text(header + rows) as path:
+        try:
+            load_juspay_settlement_csv(path)
+            raise AssertionError("an unknown Settlement Status was accepted")
+        except ValueError as exc:
+            assert "Partially Settled" in str(exc), exc
 
 
 if __name__ == "__main__":

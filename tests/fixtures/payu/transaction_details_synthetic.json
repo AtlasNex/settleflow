@@ -1,0 +1,40 @@
+{
+  "code": "2000",
+  "message": "Success",
+  "status": 0,
+  "result": [
+    {
+      "merchantId": 99999999,
+      "merchantTransactionId": "MTX-TEST-0001",
+      "payuId": "943323893640",
+      "transactionType": "capture",
+      "settlementStatus": "Settled",
+      "settlementUTR": "TESTUTR0000000001",
+      "settlementDate": "2025-10-13T02:51:22",
+      "settlementId": "SETTLETEST20251013001",
+      "settlementAmount": 990.56
+    },
+    {
+      "merchantId": 99999999,
+      "merchantTransactionId": "MTX-TEST-0001",
+      "payuId": "943323893640",
+      "transactionType": "refund",
+      "settlementStatus": "Settled",
+      "settlementUTR": "TESTUTR0000000001",
+      "settlementDate": "2025-10-13T02:51:22",
+      "settlementId": "SETTLETEST20251013001",
+      "settlementAmount": -990.56
+    },
+    {
+      "merchantId": 99999999,
+      "merchantTransactionId": "MTX-TEST-0002",
+      "payuId": "943323893641",
+      "transactionType": "chargeback",
+      "settlementStatus": "On Hold",
+      "settlementUTR": null,
+      "settlementDate": "2025-10-14T02:11:07",
+      "settlementId": "SETTLETEST20251014002",
+      "settlementAmount": -50.0
+    }
+  ]
+}

@@ -12,10 +12,23 @@ Verified & wired (2026-08-16):
 - Razorpay recon CSV       (official sample file on razorpay.com/docs)
 - HDFC / SBI / ICICI / Axis / Kotak bank-statement CSVs (real fixtures + parsers)
 
-Verified schema but NOT wired (needs a dedicated parser or a real file to
-resolve a money-unit / type-semantics ambiguity): Cashfree recon (two-section
-file), PhonePe settlement report (tax columns, undocumented type values),
-Juspay settlement file (money unit unstated). See docs/SCHEMAS.md.
+Verified & wired (2026-09-11, research in docs/RESEARCH-gateway-samples.md):
+- Cashfree Settlement Recon report — BOTH sections of the one file, via
+  load_cashfree_recon_report(): 14-col batches (which land in the bank) and
+  63-col per-event lines.
+- PayU — the two official settlement APIs are parsed in parsers.py
+  (parse_payu_settlement_range / parse_payu_transaction_details) and exposed
+  through API_PARSERS. PayU's CSV export is closed as BY-DESIGN un-wireable:
+  the merchant picks its columns in a dashboard dialog.
+- Juspay settlement file — load_juspay_settlement_csv() handles both the
+  documented 25-column schema and the variant Juspay's own parser reads. Money
+  unit RUPEES is vendor-code corroboration, NOT documented — see the loader.
+
+Verified header but deliberately NOT wired: PhonePe's plain settlements report
+and Cashfree's plain settlements report (no public column table — use the
+vendors' JSON APIs) and IDFC statements (no real public sample exists; four
+community parsers corroborate the PDF layout but every one of them tests against
+hand-written mock text). See docs/SCHEMAS.md.
 """
 from __future__ import annotations
 
@@ -27,6 +40,9 @@ from pathlib import Path
 
 from .models import ReconLine, Txn
 from .parsers import (
+    _money_or_zero,
+    _recon_lines_from_rows,
+    _txns_from_rows,
     load_bank_statement_csv,
     load_csv,
     load_recon_csv,
@@ -34,8 +50,11 @@ from .parsers import (
     parse_bank_text,
     parse_date,
     parse_drcr_statement,
+    parse_payu_settlement_range,
+    parse_payu_transaction_details,
     parse_razorpay_recon,
     parse_razorpay_settlements,
+    split_cashfree_recon_report,
 )
 from .pdf import parse_sbi_statement
 
@@ -63,7 +82,14 @@ class BankColumnMap:
 
 @dataclass(frozen=True)
 class ReconColumnMap:
-    """Column names for load_recon_csv, from a real recon CSV header."""
+    """Column names for load_recon_csv, from a real recon CSV header.
+
+    Set `direction_col` for a vendor that prints a CREDIT/DEBIT flag instead of a
+    debit/credit pair; then `debit_col` and `credit_col` are unused and are
+    passed as "" (they cannot be dropped: they are positional in this dataclass
+    and every map shares the shape), and `direction_amount_col` names the column
+    carrying the money MOVEMENT while `amount_col` stays the gross amount.
+    """
 
     entity_id_col: str
     type_col: str
@@ -78,6 +104,8 @@ class ReconColumnMap:
     utr_col: str | None = None
     order_id_col: str | None = None
     payment_id_col: str | None = None
+    direction_col: str | None = None
+    direction_amount_col: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +118,22 @@ SETTLEMENT_CSV_MAPS: dict[str, ColumnMap | None] = {
     "razorpay_settlement_csv": ColumnMap(
         utr_col="utr", amount_col="amount", date_col="created_at", ref_col="id",
     ),
-    "cashfree_settlement_csv": None,   # plain settlement report header not public
-    "payu_settlement_csv": None,       # columns are user-selectable; no fixed header
+    # Section 1 of Cashfree's two-section Settlement Recon report — the
+    # settlement BATCHES, i.e. what lands in the bank. Verbatim 14-column header
+    # in docs/RESEARCH-gateway-samples.md §1a. `Net Settlement Amount` is what
+    # Cashfree documents as total - charge - tax + adjustment, which is the
+    # credit a bank line reconciles against.
+    # Do NOT read the raw file through this map: section 2's 63-column event
+    # rows would be read as more batches. Use load_cashfree_recon_report().
+    "cashfree_settlement_csv": ColumnMap(
+        utr_col="UTR No.", amount_col="Net Settlement Amount",
+        date_col="Settlement Date", ref_col="Id",
+    ),
+    # PayU's settlement CSV export is user-configurable column-by-column in the
+    # dashboard (docs.payu.in/docs/export-the-settlement-records), so no fixed
+    # public header can ever exist. Closed as BY-DESIGN, not as un-found: use
+    # parse_payu_settlement_range / parse_payu_transaction_details instead.
+    "payu_settlement_csv": None,
     # PhonePe's settlement report is one row per TRANSACTION, so the rows must be
     # aggregated per bank credit before level-1 matching — see
     # load_phonepe_settlement_csv() below, which this map feeds. Column names below
@@ -105,7 +147,15 @@ SETTLEMENT_CSV_MAPS: dict[str, ColumnMap | None] = {
         date_col="SettlementDate",      # dd-MM-yyyy
         ref_col="MerchantReferenceId",
     ),
-    "juspay_settlement_csv": None,     # 25-col schema documented; money unit unstated
+    # The documented 25-column schema is real (juspay.io/pe/docs/.../settlement-files)
+    # and Juspay's own production parser reads the same file, but it cannot be
+    # expressed as a ColumnMap: it has separate Credit and Debit columns instead
+    # of one amount, and the documented variant carries NO bank-UTR column. It
+    # gets a dedicated loader (load_juspay_settlement_csv) instead.
+    # Two things are still UNVERIFIED on a real populated file: the money unit
+    # (docs say only "Integer"; vendor code reads plain rupee decimals, so
+    # RUPEES) and whether one Settlement Date really is one bank credit.
+    "juspay_settlement_csv": None,
 }
 
 
@@ -129,9 +179,31 @@ RECON_CSV_MAPS: dict[str, ReconColumnMap | None] = {
         order_id_col="order_id",
         payment_id_col=None,               # entity_id IS the payment id for payments
     ),
-    "cashfree_recon_csv": None,   # two-section file (14 + 48 cols) -> dedicated parser
+    # Section 2 (63 columns, not 48 — SCHEMAS.md undercounted) of the same
+    # two-section Cashfree file as cashfree_settlement_csv above; read it through
+    # load_cashfree_recon_report(), which splits the file first. There is no
+    # debit/credit column pair and no separate batch-id column: the direction is
+    # `Sale Type` (CREDIT/DEBIT), the money movement is `Event Settlement Amount`
+    # (already net of the fee/tax columns beside it — and it is printed NEGATIVE
+    # on a refund, which is why the loader takes the magnitude and lets the flag
+    # set the side), and the batch is identified by its `UTR`, so both
+    # settlement_id_col and utr_col point at `UTR`.
+    "cashfree_recon_csv": ReconColumnMap(
+        entity_id_col="Event Id",
+        type_col="Event Type",
+        debit_col="", credit_col="",
+        direction_col="Sale Type", direction_amount_col="Event Settlement Amount",
+        amount_col="Event Amount",
+        date_col="Event Time",
+        settlement_id_col="UTR",
+        currency_col="Event Currency",
+        fee_col="Transaction Service Charge",
+        tax_col="Txn ST/GST",
+        utr_col="UTR",
+        order_id_col="Merchant Reference Id",
+    ),
     "phonepe_recon_csv": None,    # tax columns + undocumented type values -> real file needed
-    "juspay_recon_csv": None,     # money unit unstated -> real file needed
+    "juspay_recon_csv": None,     # no bank-UTR column in the schema -> see load_juspay_settlement_csv
 }
 
 
@@ -259,6 +331,167 @@ def load_phonepe_settlement_csv(path) -> list[Txn]:
     ]
 
 
+# Juspay's documented Settlement Status values. Only "Settled" means the funds
+# have actually reached the merchant's bank account, so only those rows may be
+# netted into a bank credit. An unrecognised value raises: a row dropped by a
+# guessed filter is a reconciliation error nobody sees.
+_JUSPAY_SETTLED = "Settled"
+_JUSPAY_SETTLEMENT_STATUSES = frozenset(
+    {"Sent for settlement", "Settled", "Pending", "Failed"}
+)
+
+
+def load_juspay_settlement_csv(path) -> list[Txn]:
+    """Load a Juspay settlement file as one Txn per BANK CREDIT.
+
+    Handles the two real shapes of this file, keyed off its header:
+
+    * the DOCUMENTED 25-column schema (juspay.io/pe/docs/upi-merchant-stack-pe/
+      docs/resources/settlement-files): per-transaction rows with separate
+      `Credit` and `Debit` columns and NO bank-UTR column; and
+    * the variant Juspay's OWN production parser reads (nammayatri/shared-kernel,
+      YesBiz), which carries `UTR Number` plus `Partner Amount`.
+
+    Rows are netted per bank credit: grouped by `UTR Number` where the file has
+    one, otherwise by `Settlement Date` — the only settlement-level key the
+    documented schema carries. The credit is sum(Credit) - sum(Debit).
+
+    Handing the per-transaction rows straight to `match()` would repeat what
+    PhonePe's loader exists to prevent: every row matched against one bank
+    credit, a wall of false "unmatched".
+
+    NOT VERIFIED — this loader runs entirely on documentation and vendor code,
+    never on a real populated file, and three things ride on that:
+      * the money unit: the docs say only "Integer", while Juspay's own parser
+        reads plain rupee decimals (no /100). RUPEES is assumed.
+      * one `Settlement Date` being one bank credit. The documented variant has
+        no batch id and no UTR, so nothing better is available to key on.
+      * the `Settlement Status` filter: correct per the docs, never seen in a
+        real file.
+    Treat a Juspay run as needing review until a real file and its matching bank
+    credit agree.
+    """
+    raw = Path(path).read_text(encoding="utf-8-sig")
+    reader = csv.DictReader(io.StringIO(raw))
+    header = reader.fieldnames or []
+    if "Settlement Date" not in header:
+        raise ValueError(
+            "not a Juspay settlement file: no 'Settlement Date' column in header "
+            f"{header[:8]}"
+        )
+
+    has_utr = "UTR Number" in header
+    sum_direction = "Credit" in header and "Debit" in header
+    sum_partner = "Partner Amount" in header
+    if not sum_direction and not sum_partner:
+        raise ValueError(
+            "Juspay settlement file has neither Credit/Debit nor Partner Amount "
+            "columns — unknown variant; refusing to guess the amount column"
+        )
+
+    rows = list(reader)
+    if "Settlement Status" in header:
+        seen = {(r.get("Settlement Status") or "").strip() for r in rows}
+        unexpected = {s for s in seen if s and s not in _JUSPAY_SETTLEMENT_STATUSES}
+        if unexpected:
+            raise ValueError(
+                f"unrecognised Juspay Settlement Status {sorted(unexpected)}; "
+                f"expected one of {sorted(_JUSPAY_SETTLEMENT_STATUSES)}"
+            )
+
+    nets: dict[str, Decimal] = {}
+    dates: dict[str, object] = {}
+    refs: dict[str, str | None] = {}
+    utrs: dict[str, str | None] = {}
+    order: list[str] = []
+
+    for row in rows:
+        status = (
+            (row.get("Settlement Status") or "").strip()
+            if "Settlement Status" in header else _JUSPAY_SETTLED
+        )
+        if status != _JUSPAY_SETTLED:
+            continue        # dispatched / pending / failed: no funds at the bank yet
+        key = (
+            (row.get("UTR Number") or "").strip() if has_utr
+            else (row.get("Settlement Date") or "").strip()
+        )
+        if not key:
+            continue        # nothing to key a bank credit on
+        if sum_direction:
+            amount = _money_or_zero(row.get("Credit")) - _money_or_zero(row.get("Debit"))
+        else:
+            amount = _money_or_zero(row.get("Partner Amount"))
+
+        if key not in nets:
+            date_cell = (row.get("Settlement Date") or "").strip()
+            try:
+                dates[key] = parse_date(date_cell)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Juspay Settlement Date could not be read ({date_cell!r}) for "
+                    f"{key!r}; expected dd/mm/yyyy"
+                ) from exc
+            nets[key] = Decimal("0")
+            utrs[key] = key if has_utr else None
+            refs[key] = (
+                (row.get("Order ID") or row.get("UPI Request Id") or "").strip() or None
+            )
+            order.append(key)
+        nets[key] += amount
+
+    return [
+        Txn(utr=utrs[k], amount=nets[k], txn_date=dates[k], ref=refs[k])  # type: ignore[arg-type]
+        for k in order
+    ]
+
+
+def load_cashfree_recon_report(path) -> tuple[list[Txn], list[ReconLine]]:
+    """Load Cashfree's Settlement Recon report — BOTH sections of the one file.
+
+    Returns `(batches, lines)`: one Txn per settlement batch (what the bank
+    credited, with `UTR No.` as the UTR) and one ReconLine per event inside those
+    batches. The file really is two reports concatenated, so the split comes
+    first and each section is then read through its own registered column map —
+    there is no other way to read it, because the sections' headers disagree.
+
+    Money in both sections is already in rupees.
+    """
+    raw = Path(path).read_text(encoding="utf-8-sig")
+    batch_text, event_text = split_cashfree_recon_report(raw)
+
+    bmap = SETTLEMENT_CSV_MAPS["cashfree_settlement_csv"]
+    emap = RECON_CSV_MAPS["cashfree_recon_csv"]
+    assert bmap is not None and emap is not None, "cashfree maps must stay filled"
+
+    batches = _txns_from_rows(
+        csv.DictReader(io.StringIO(batch_text)),
+        bmap.utr_col, bmap.amount_col, bmap.date_col, bmap.ref_col,
+    )
+    lines = _recon_lines_from_rows(
+        csv.DictReader(io.StringIO(event_text)),
+        entity_id_col=emap.entity_id_col, type_col=emap.type_col,
+        debit_col=emap.debit_col, credit_col=emap.credit_col,
+        amount_col=emap.amount_col, date_col=emap.date_col,
+        settlement_id_col=emap.settlement_id_col, currency_col=emap.currency_col,
+        fee_col=emap.fee_col, tax_col=emap.tax_col, utr_col=emap.utr_col,
+        order_id_col=emap.order_id_col, payment_id_col=emap.payment_id_col,
+        direction_col=emap.direction_col,
+        direction_amount_col=emap.direction_amount_col,
+    )
+    return batches, lines
+
+
+# Files that are NOT one (utr, amount, date) row per bank credit, so no column
+# map can describe them and the loader IS the wiring. Everything else is
+# map-driven through load_csv. load_cashfree_recon_report is not here: it returns
+# two row types, so it is called by name, not through a vendor key.
+VENDOR_LOADERS = {
+    "phonepe_settlement_csv": load_phonepe_settlement_csv,
+    "juspay_settlement_csv": load_juspay_settlement_csv,
+}
+
+
 def load_settlement_csv(path, vendor: str) -> list[Txn]:
     """Load a vendor settlement CSV using its registered column map.
 
@@ -267,17 +500,15 @@ def load_settlement_csv(path, vendor: str) -> list[Txn]:
     """
     if vendor not in SETTLEMENT_CSV_MAPS:
         raise KeyError(f"unknown vendor {vendor!r}; register it in SETTLEMENT_CSV_MAPS")
+    dedicated = VENDOR_LOADERS.get(vendor)
+    if dedicated is not None:
+        return dedicated(path)
     cm = SETTLEMENT_CSV_MAPS[vendor]
     if cm is None:
         raise ValueError(
             f"{vendor}: column map not filled — supply a real sample file's header "
             "(D-7: never guess a schema; see docs/SCHEMAS.md)"
         )
-    if vendor == "phonepe_settlement_csv":
-        # This vendor's file is per-transaction while ours is per-batch; the
-        # aggregating loader above does the netting. Everywhere else the map alone
-        # is the whole story.
-        return load_phonepe_settlement_csv(path)
     return load_csv(path, cm.utr_col, cm.amount_col, cm.date_col, cm.ref_col)
 
 
@@ -343,12 +574,19 @@ def load_vendor_recon_csv(path, vendor: str) -> list[ReconLine]:
         settlement_id_col=cm.settlement_id_col, currency_col=cm.currency_col,
         fee_col=cm.fee_col, tax_col=cm.tax_col, utr_col=cm.utr_col,
         order_id_col=cm.order_id_col, payment_id_col=cm.payment_id_col,
+        direction_col=cm.direction_col,
+        direction_amount_col=cm.direction_amount_col,
     )
 
 
-# The Razorpay API-JSON parsers are the only verified API surfaces; expose them
-# through the registry too so callers have one entry point.
+# Every verified API-JSON parser, so callers have one entry point for the
+# vendors whose data is not a CSV. PayU's two endpoints are here because its
+# settlement CSV export cannot have a fixed header at all (see parsers.py).
+# Cashfree's recon is not an API parser: it is a two-section FILE, reached by
+# name through load_cashfree_recon_report above.
 API_PARSERS = {
     "razorpay_settlements_api": parse_razorpay_settlements,
     "razorpay_recon_api": parse_razorpay_recon,
+    "payu_settlement_range_api": parse_payu_settlement_range,
+    "payu_transaction_details_api": parse_payu_transaction_details,
 }
