@@ -1,0 +1,19 @@
+{# One footer for every page. The audit's finding was that a visitor could not tell
+   who built this, what it costs, or how to make contact; these four links fix that
+   and the repo link is the differentiator no competitor can copy. #}
+<footer>
+  <a href="/">Reconcile</a>
+  <a href="/about">About</a>
+  <a href="/pricing">Pricing</a>
+  <a href="/contact">Contact</a>
+  <a href="/privacy">Privacy</a>
+  <a href="/terms">Terms</a>
+  <a href="{{ footer.repo_url }}" rel="noopener">Source (MIT)</a>
+  <p style="margin:.6rem 0 0">
+    SettleFlow v{{ footer.version }} · built by AtlasNex ·
+    <a href="mailto:{{ footer.contact_email }}">{{ footer.contact_email }}</a>
+  </p>
+  <p style="margin:.4rem 0 0">
+    Not tax advice. Runs and their exports are deleted after {{ footer.retention_days }} days.
+  </p>
+</footer>

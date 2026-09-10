@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+{% include "_head.html" %}
+{% include "_style.html" %}
+</head>
+<body>
+  <p style="margin:0 0 1rem"><a href="/">← SettleFlow</a></p>
+  <h1>{{ heading }}</h1>
+  {{ body_html | safe }}
+{% include "_footer.html" %}
+</body>
+</html>

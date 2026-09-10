@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+{% include "_head.html" %}
+{% include "_style.html" %}
+</head>
+<body>
+  <h1>Reconciliation result</h1>
+  <p class="muted" style="margin-top:0">
+    {{ kind }} · {% if created %}{{ created.strftime('%d %b %Y, %H:%M UTC') }}{% else %}just now{% endif %}
+  </p>
+
+  {# This URL is the credential — say so plainly, because there is no account to
+     recover it from. #}
+  <div class="card">
+    <strong>Bookmark this page.</strong>
+    <p style="margin:.4rem 0 0">
+      It is the only route back to this run — there is no account to log into.
+      It is deleted automatically after {{ footer.retention_days }} days.
+      Treat the link as private: anyone who has it can read this reconciliation.
+    </p>
+  </div>
+
+  <h2>Summary</h2>
+  <div class="grid">
+    <div class="stat"><span class="n ok">{{ result.matched | length }}</span><span class="k">Matched</span></div>
+    <div class="stat"><span class="n {% if result.settlement_only %}warn{% endif %}">{{ result.settlement_only | length }}</span><span class="k">In gateway, not in bank</span></div>
+    <div class="stat"><span class="n {% if result.bank_only %}warn{% endif %}">{{ result.bank_only | length }}</span><span class="k">In bank, not in gateway</span></div>
+    <div class="stat"><span class="n {% if exceptions %}danger{% endif %}">{{ exceptions | length }}</span><span class="k">Exceptions</span></div>
+  </div>
+
+  <table>
+    <tr><th>Side</th><th>Total</th></tr>
+    <tr><td>Matched value</td><td>{{ result.matched_total }}</td></tr>
+    <tr><td>Unmatched — gateway side</td><td>{{ result.unmatched_settlement_total }}</td></tr>
+    <tr><td>Unmatched — bank side</td><td>{{ result.unmatched_bank_total }}</td></tr>
+  </table>
+
+  {% if exceptions %}
+  <h2>Exceptions <span class="muted" style="font-weight:400">— these are the rows a person needs to look at</span></h2>
+  <table>
+    <tr><th>Category</th><th>Amount</th><th>What it means</th></tr>
+    {% for e in exceptions %}
+    <tr>
+      <td><code>{{ e.category }}</code></td>
+      <td>{{ e.amount }}</td>
+      <td>{{ e.detail }}{% if e.utr %}<br><span class="muted">UTR {{ e.utr }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <h2>Exceptions</h2>
+  <p class="ok">None — every row on both sides either matched or belongs to a matched batch.</p>
+  {% endif %}
+
+  {% if result.matched %}
+  <h2>Matched ledger</h2>
+  <table>
+    <tr><th>Gateway reference</th><th>Bank UTR</th><th>Amount</th><th>How</th></tr>
+    {% for m in result.matched %}
+    <tr>
+      <td>{{ m.settlement or '—' }}</td>
+      <td>{{ m.bank or '—' }}</td>
+      <td>{{ m.amount }}</td>
+      <td class="muted">{{ m.status }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h2>Workpapers</h2>
+  {% if exports %}
+  <p>Download the files your accountant actually wants:</p>
+  <p>
+    <a class="btn" href="/r/{{ token }}/export/tally.csv">Tally CSV</a>
+    {% if 'gst.csv' in exports %}<a class="btn" href="/r/{{ token }}/export/gst.csv">GST worksheet</a>{% endif %}
+    {% if 'tds1035.csv' in exports %}<a class="btn" href="/r/{{ token }}/export/tds1035.csv">TDS code-1035</a>{% endif %}
+    <a class="btn secondary" href="/r/{{ token }}/exceptions">Exceptions (JSON)</a>
+  </p>
+  <p class="muted">
+    GST and TDS workpapers come from the line-item settlement file only — choose
+    "Settlement Recon" on a batch-level run and those two stay empty.
+  </p>
+  {% else %}
+  <p class="warn">No exports were generated for this run.</p>
+  {% endif %}
+
+  <div class="card" id="pack">
+    <h3 style="margin-top:0">Email me this workpaper pack</h3>
+    {% if saved %}
+      <p class="ok" style="margin:0">Saved — thanks. {% if not smtp_ready %}Note: email delivery is not wired up on this
+        deployment yet, so nothing was sent; the address was recorded and the workpapers are
+        in the buttons above.{% endif %}</p>
+    {% else %}
+      {% if form_error == 'email' %}
+        <p class="danger" style="margin-top:0">That does not look like an email address. Try again, or just use the download buttons above.</p>
+      {% endif %}
+      <form action="/r/{{ token }}/notify" method="post">
+        <label for="email">Your email
+          <input type="email" id="email" name="email" required placeholder="you@company.com" autocomplete="email">
+        </label>
+        <button type="submit">Send me the pack</button>
+      </form>
+      <p class="muted" style="margin-bottom:0">
+        Optional — the downloads above work either way. We use the address to send this
+        pack and, at most, to tell you when a new bank format ships.
+      </p>
+    {% endif %}
+  </div>
+
+  <h2>What we read</h2>
+  <table>
+    <tr><th>File</th><th>Columns used</th></tr>
+    <tr><td>Settlement</td><td><code>{{ kind }}</code></td></tr>
+    <tr><td>Bank statement</td>
+      <td>UTR <code>{{ mapping.utr or '—' }}</code>,
+          amount <code>{{ mapping.amount or '—' }}</code>,
+          date <code>{{ mapping.date or '—' }}</code></td></tr>
+  </table>
+  <p class="muted">
+    If those columns are wrong, the reconciliation is wrong — re-run it from the
+    <a href="/">upload page</a> and name the columns under Advanced.
+  </p>
+
+{% include "_footer.html" %}
+</body>
+</html>

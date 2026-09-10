@@ -1,0 +1,13 @@
+{# Shared <head> furniture: meta description + Open Graph. The 30 Aug audit
+   found the site had neither, so every page now carries both. #}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+{% if noindex %}<meta name="robots" content="noindex, nofollow">{% endif %}
+<meta name="description" content="{{ description | default('Reconcile a payment-gateway settlement file against your bank statement and export Tally, GST and TDS code-1035 workpapers. Open source (MIT), free while in beta.') }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SettleFlow">
+<meta property="og:title" content="{{ title }}">
+<meta property="og:description" content="{{ description | default('Reconcile a payment-gateway settlement file against your bank statement and export Tally, GST and TDS code-1035 workpapers.') }}">
+<meta property="og:url" content="{{ request.url }}">
+<meta name="twitter:card" content="summary">
