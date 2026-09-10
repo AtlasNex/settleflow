@@ -465,3 +465,28 @@ survived because the OSS component layer is genuinely un-owned.
 - **Rejected:** a `juspay_recon_csv` map from the HyperPG column set. It has no real file behind it
   either, and two speculative maps is twice the unverified surface with none of the evidence.
 - **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-37: The product is named **Conjunction**
+- **Who:** Sanjay chose it himself on 2026-09-11 from three finalists presented with their costs.
+  The agent gathered the evidence and recommended; it did not decide — he names products.
+- **Why it won:** the astronomical term for two bodies appearing aligned is literally what the
+  product does (a gateway settlement and a bank credit made to agree); it fits the family register
+  (Nova, Kessler); it is **free on PyPI**; and no notable company uses the word.
+- **The evidence it was decided on** (`docs/NAMING-SHORTLIST.md`): PyPI availability for nine
+  candidates, domain registration via RDAP with controls run first, and the free compound `.com`
+  forms. Two corrections that mattered: the `.io` results were **discarded** because a control
+  (`github.io`) returned 404, so nine candidates falsely looked "available" — a broken lookup, not
+  luck; and no registry trademark search (IP India / TMview, classes 9/42) was run, so brand
+  clearance is stated as open rather than implied.
+- **The cost, accepted and stated once:** it is a common English word, so it will be hard to rank
+  for and ambiguous in conversation. Mitigation is a compound domain plus always pairing the word
+  with its category, the way Stripe pairs with payments.
+- **Rejected:** Equinox (Equinox Group's brand fan-out, and a well-known JAX library), Pulsar
+  (Apache Pulsar owns developer mindshare; also a watch brand), Syzygy (SYZYGY AG is listed on the
+  Frankfurt exchange; unspellable) — Syzygy stays available as the three-way-match feature name.
+- **Consequence:** `settleflow` becomes a deprecated placeholder. The rename is planned in
+  `docs/NAMING-SHORTLIST.md` in an ordered sequence (repo first and verified, then the live host)
+  and is deliberately **not executed**: the last step moves `/opt/settleflow` and the systemd unit,
+  which needs the deploy script's path allowlist changed by hand, and a rename that drifts is how a
+  live service quietly stops being deployable. It lands as D-38 when it is done.
+- **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.

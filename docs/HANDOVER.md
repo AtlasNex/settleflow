@@ -20,17 +20,17 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 ## Current state (2026-09-11)
 
-### ⚠️ OPEN THREAD — Sanjay asked for the product NAME and the session ended before answering
+### ✅ RESOLVED — the name is **Conjunction**; the rename is planned, not executed
 
-> *"think of names from space, like how OpenAI and Anthropic names their products, also we have
-> similar projects Nova and brand new one Kessler."*
+He chose it on 2026-09-11 (session 15), from three finalists presented with their costs. `settleflow`
+is now a **deprecated placeholder**. The evidence he decided on, the accepted cost, and the ordered
+rename sequence (repo first and verified, then the live host, then the Cloudflare ingress and the
+Hermes watchdog) are in `docs/NAMING-SHORTLIST.md`; `DECISIONS.md` D-37 records the choice.
 
-`settleflow` is still the documented placeholder (`CONSTRAINTS.md` #10 forbids renaming without a
-traceable diff + a `DECISIONS.md` entry). Family register: **Nova** (geospatial), **Kessler** (new
-project). Semantic target: two records being made to agree. Starter shortlist — **Conjunction**
-(best fit), **Equinox**, **Parallax**, **Pulsar**, **Epoch**, **Syzygy**, plus Perigee/Alcyone/Vega.
-Full brief, the rename blast-radius checklist, and the do-not-decide-for-him rule are in
-`docs/PROMPT-continue-settleflow.md` §1. **Start here.**
+**The rename has NOT been done.** It is a real diff whose last steps move `/opt/settleflow`, the
+`settleflow.service` unit, and the deploy script's path allowlist — a rename that drifts is how a
+live service quietly stops being deployable. Nothing was purchased either: re-check the domain and
+reserve the PyPI name (both are Sanjay's calls) before starting.
 
 ### Session 15 — the three unblocked gateway parsers are wired
 

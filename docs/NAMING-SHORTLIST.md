@@ -1,4 +1,26 @@
-# Naming shortlist — for Sanjay to choose (2026-09-11, session 15)
+# Naming — CHOSEN: **Conjunction** (2026-09-11)
+
+**Sanjay chose `Conjunction` on 2026-09-11.** `settleflow` is now a deprecated placeholder; the
+rename is planned below and **not yet executed** (the VPS path change is the risky step and it
+needs a deliberate go, not a drift).
+
+The rest of this file is the evidence the choice was made on. `docs/CONSTRAINTS.md` #10 still
+applies: the rename lands as a traceable diff plus a `DECISIONS.md` entry (D-37 records the choice).
+
+## Why this name
+
+The astronomical term for two bodies appearing aligned — which is literally the product's job:
+a gateway settlement and a bank credit, made to agree. It is the only candidate that is
+simultaneously the correct word, **free on PyPI**, and unclaimed by a notable company.
+
+**The cost, stated once and not relitigated:** it is a common English word, so it will be hard to
+rank for and awkward to say in conversation ("did you run the conjunction?"). The mitigations are a
+compound domain plus always pairing the word with its category — *Conjunction, for UPI settlement
+reconciliation* — the way Stripe pairs with payments.
+
+---
+
+# Original shortlist evidence (kept: this is what the decision rested on)
 
 `settleflow` is the documented placeholder. `docs/CONSTRAINTS.md` #10 forbids renaming without a
 traceable diff plus a `DECISIONS.md` entry, and Sanjay asked for the name himself:
@@ -70,12 +92,50 @@ again. Free on PyPI. **Cost:** obscure, nine letters, and nobody spells it on th
 simultaneously the correct word, free on PyPI, and unclaimed by a notable company — and the
 `*.com` penalty is identical for every single-word option.
 
-## If he picks one, the rename blast radius (plan, do not start mid-session)
+## The rename to `Conjunction` — ordered plan (NOT executed; needs Sanjay's go)
 
-`pyproject.toml` name and console-script entry point · the `settleflow/` package directory ·
-`README.md` · `MASTER-PLAN.md` · all of `docs/` · the CLI entry point and its `--help` text ·
-the live site's copy and `/about` page · the `settleflow.service` unit on the VPS and the
-`/opt/settleflow` path · the Cloudflare tunnel ingress · `brand-context.md` ·
-`tests/test_matching.py`'s imports · a `DECISIONS.md` entry recording the choice and the
-`settleflow` → `<name>` git history boundary. Roughly a one-session job, and the VPS path change
-is the part that needs the deploy script's allowlist touched rather than a plain `deploy.sh` run.
+Sequenced so that the repo is renamed and verified BEFORE anything on the live host moves. Steps 1-3
+are safe and reversible; step 4 is the one that can take the site down.
+
+**Phase 0 — before touching the repo (facts that expire)**
+1. Re-check the four compound `.com` options at the registrar (RDAP said free on 2026-09-11:
+   `getconjunction.com`, `conjunctionapp.com`, `tryconjunction.com`, `conjunctionrecon.com`).
+   Registration is a purchase — Sanjay's call, not mine. Note `conjunction.com` and `conjunction.in`
+   are registered and are not for the taking.
+2. Reserve `conjunction` on PyPI (it is free today; PyPI names are first-come).
+
+**Phase 1 — inside the repo (one commit per step, self-check green between each)**
+3. Rename the package directory `settleflow/` → `conjunction/` and update `tests/test_matching.py`'s
+   `sys.path` + imports. Verify: `python tests/test_matching.py` → 64 checks.
+4. `pyproject.toml`: `name`, the console-script entry point, and the wheel/pyproject metadata.
+   Verify: build the wheel and install it in a clean venv, then run the CLI's `--help`.
+5. Prose sweep: `README.md`, `MASTER-PLAN.md`, `brand-context.md`, `docs/**`, `AGENTS.md`,
+   `CONTRIBUTING.md`, `SECURITY.md`, `sitemap.xml`/`llms.txt` in `saas/`, the page templates and
+   copy. Verify: `grep -rn settleflow` returns only the intentional historical references
+   (the `DECISIONS.md` boundary entry below, and the git history).
+6. `DECISIONS.md` D-38: record the rename and mark the `settleflow` → `conjunction` boundary in git
+   history, so "settleflow" in old commits is explained rather than confusing.
+7. Push both repos' rename, wait for CI green on the pushed head (the repo is public and CI is the
+   gate).
+
+**Phase 2 — the live host (the risky half; do it deliberately, with the rollback ready)**
+8. `saas/` copy change → `bash scripts/deploy.sh` (it refuses to ship on a red self-check, backs up,
+   restarts, then asserts `/health`, runs the end-to-end canary, and checks the public URL).
+   Verify: canary 5/5 on `conjunction.atlasnex.com` (or whichever hostname is decided) **and** on the
+   existing one while it still answers.
+9. Only then the VPS moves: the `settleflow.service` unit and `/opt/settleflow` → `/opt/conjunction`,
+   which means **the deploy script's path allowlist changes too** — a plain `deploy.sh` run will not
+   do it, because the script ships an allowlist of paths and cannot delete files by itself. Rollback
+   for this step: the previous release is on disk, `bash scripts/rollback.sh latest`.
+10. The Cloudflare tunnel ingress is remote-managed (`PUT /accounts/{acct}/cfd_tunnel/{tun}/configurations`,
+    tunnel `9a8936c6-d343-41da-b792-d7e6b5489037`); a local `config.yml` edit is ignored. Change the
+    hostname and/or the `:8093` service mapping there, then re-run the canary.
+
+**Not to be forgotten (verified 2026-09-11, not assumed):** the Hermes watchdog cron job
+`34f4e54a27d8` ("SettleFlow canary", `*/15 * * * *`, `--no-agent`) runs
+`C:/Users/sanja/AppData/Local/hermes/scripts/settleflow_canary.py`, whose public base is
+`os.environ.get("SETTLEFLOW_PUBLIC_BASE", "https://settleflow.atlasnex.com")` — a default with an
+env override, so the rename must change **either** that default **or** set the env var, and must
+also carry the `CANARY` path it shells out to. Leave it and the alerting keeps polling the old
+hostname: green right up until the old hostname stops answering, which is the one day it matters.
+Its state/log live in `C:/Users/sanja/AppData/Local/hermes/state/settleflow-canary{,-state}.json`.

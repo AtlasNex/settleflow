@@ -448,7 +448,9 @@ column correction), `fd2c538` (DECISIONS D-34/D-35/D-36), plus the handover and 
 detection is untouched, so the live service is unchanged on 0.7.3. A release tag is a separate
 call for Sanjay.
 
-**Still open (unchanged by this session):** IDFC statements (no real public sample exists — the
-gate held), Cashfree's plain settlements report (no public column table; use its JSON API),
-PhonePe's per-settlement aggregate still unjoined to a real bank credit, and Sanjay's product
-NAME decision (`PROMPT-continue-settleflow.md` §1).
+**Still open (unchanged by the parser work):** IDFC statements (no real public sample exists — the
+gate held), Cashfree's plain settlements report (no public column table; use its JSON API), and
+PhonePe's per-settlement aggregate still unjoined to a real bank credit.
+
+**Named later in this same session:** Sanjay chose **Conjunction** as the product name (D-37), and
+the rename plan is in `docs/NAMING-SHORTLIST.md` — planned, deliberately not executed.
