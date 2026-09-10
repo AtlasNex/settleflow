@@ -26,39 +26,84 @@ open-source parsers that read that exact vendor's real export. Cross-check
   `arn`, `payment_notes` don't exist in the API JSON).
 - Source: official sample `razorpay.com/docs/build/browser/assets/images/sample-settlements-recon-report.xlsx`.
 
-### Cashfree — Settlement Recon report (NOT wired — two-section file)
+### Cashfree — Settlement Recon report (WIRED — both sections of the one file)
 
-- Settlements section (14 cols): `ID, Total Transaction Amount, Settlement Amount, Adjustment, Net Settlement Amount, From, Till, Status, UTR No., Settlement Date, Settlement Type, Settlement Charge, Settlement Tax, Remarks`
-- Transaction details section (48 cols): `Event ID, Event Type, Sale Type, Event Currency, Event Time, Processed On, Status, Event Amount, Event Settlement Amount, Settlement Date, UTR, Refund Type, Refund ARN, Adjustment Remarks, Merchant Reference ID, Customer Reference ID, Cashfree Reference ID, Customer Name, Customer Phone, Customer Email, Currency, Transaction Amount, Transaction Service Charge, Txn ST/GST, Net Settlement Amount, Transaction Time, Payment Mode, Bank Name, Auth ID, Card Type (Scheme), Vendor ID 1..5, Vendor Amount 1..5, Key_1, Value_1, Key_2, Value_2, Key_3, Value_3, Order Amount, Payment Mode SubType`
-- Money unit: rupees (2 decimals).
-- Date: `YYYY-MM-DD HH:MM:SS`.
-- Why not wired: one file has two different header sections; needs a dedicated
-  two-section parser, not a flat column map.
-- Source: `cashfree.com/docs/partners/embedded/reports/settlement-recon-reports`.
-- Public API alternative: settlement-reconciliation API JSON (`event_id, event_type, event_amount, event_settlement_amount, ...`).
+- ONE file, TWO reports, separated by the marker line
+  `** Settlement Reconciliation Details **`:
+  - **Settlement batches (14 cols, verbatim from a real export):** `Id, Total Transaction Amount, Settlement Amount, Adjustment, Net Settlement Amount, From, Till, Status, UTR No., Settlement Date, Settlement Type, Settlement Charge, Settlement Tax, Remarks`
+  - **Event lines — 63 cols, NOT 48.** The earlier count in this file was wrong and
+    the correction matters, because a 48-column map silently drops 15 columns:
+    `Event Id, Event Type, Sale Type, Event Currency, Event Time, Processed On, Status, Event Amount, Event Settlement Amount, Settlement Date, UTR, Refund Type, Refund ARN, Adjustment Remarks, Merchant Reference Id, Customer Reference Id, CashFree Reference Id, Customer Name, Customer Phone, Customer Email, Currency, Transaction Amount, Transaction Service Charge, Txn ST/GST, Net Settlement Amount, Transaction Time, Payment Mode, Bank Name, Auth Id, Card Type (Scheme), Vendor ID 1..5, Vendor Amount 1..5, Key_1..Value_10, Surcharge Amount, Tax on Surcharge, Payment Mode SubType` (the first header is `Id`, not `ID`)
+- Money: rupees (2 decimals). Dates: `YYYY-MM-DD` (batches) and `YYYY-MM-DD HH:MM:SS` (events).
+- No debit/credit column pair and no batch-id column in the event section: direction is
+  `Sale Type ∈ {CREDIT, DEBIT}` applied to `Event Settlement Amount` (the money
+  movement, printed NEGATIVE on a refund), and a batch is identified by its `UTR` —
+  which is why `settlement_id_col` and `utr_col` both point at `UTR`.
+- Wired: `load_cashfree_recon_report(path) -> (list[Txn], list[ReconLine])`; the split
+  is `split_cashfree_recon_report(raw)`, which raises if the marker is absent.
+- Verified: the two header rows come from a real (header-only) committed export; the
+  data rows are synthetic (D-19 style) — `tests/fixtures/cashfree/`. The batch total and
+  the netted event total agree in that fixture, which is the check that catches a
+  direction flag applied to the gross column.
+- Source: the real file URL and the official per-column sample values are in
+  `docs/RESEARCH-gateway-samples.md` §1a/§1b.
 
-### PayU — settlement export (NOT public)
+### PayU — settlement data (WIRED through the two official APIs; the CSV export is un-wireable BY DESIGN)
 
-- The export lets the merchant pick columns (no fixed header). Public instead:
-  `get_settlement_details` API JSON (`txnid, transaction_amount, payu_fee, payu_fee_tax, net_amount, settlementId, settlementUTR, ...`), rupees, `YYYY-MM-DD HH:MM:SS`.
-- Source: `docs.payu.in/docs/export-the-settlement-records`, `docs.payu.in/reference/settlement-details`.
+- The dashboard export lets the merchant pick the columns per report, so **no fixed
+  public header can ever exist** — that is why every search for a PayU settlement CSV
+  came back empty, and it is a property of the format, not a gap in the search. Closed.
+- Public instead, and wired:
+  - `GET /settlement/range` — UTR-level (`settlementId, settlementCompletedDate,
+    settlementAmount, merchantId, utrNumber, transactionAmount, adjustmentAmount,
+    refundAmount, chargebackAmount, refundReversalAmount, chargebackReversalAmount,
+    serviceFee, serviceTax, additionalServiceFee, additionalServiceTax,
+    numberOfTransactions, transaction[]`, plus `additionalTdrFee/Tax`,
+    `totalServiceTax`, `totalProcessingFee`, `transaction/settlementCurrency`).
+    Rupee **strings**; `YYYY-MM-DD HH:MM:SS[.ffffff]`. → `parse_payu_settlement_range`.
+  - `GET /settlement/transactionDetails` — per transaction
+    (`merchantId, merchantTransactionId, payuId, transactionType, settlementStatus,
+    settlementUTR, settlementDate, settlementId, settlementAmount`). `settlementAmount`
+    is a JSON **number** and **signed** (refunds/chargebacks negative);
+    `settlementDate` is `YYYY-MM-DDTHH:MM:SS`; `settlementStatus ∈ {Settled, Pending,
+    On Hold, Failed}`. → `parse_payu_transaction_details`.
+  - Both fail closed: PayU's `status: 1` envelope raises, an unknown field raises (D-7).
+- Sources: `docs.payu.in/reference/settlement-detail-range-api.md`,
+  `docs.payu.in/reference/settlement_transaction_details_api.md`,
+  `docs.payu.in/docs/export-the-settlement-records` (the column picker).
 
-### PhonePe — settlement report (verified fields, NOT wired)
+### PhonePe — settlement report (WIRED — aggregated per bank credit)
 
-- 14 fields: `PaymentType, MerchantReferenceId, PhonePeReferenceId, From, Instrument, CreationDate, Amount, Fee, TransactionDate, SettlementDate, BankReferenceNo, IGST, CGST, SGST`
-- Money: rupees (two decimals); fee and taxes are negative-valued;
+- 15-col and 23-col real exports (23-col adds `MerchantOrderId, OriginalMerchantReferenceId,
+  OriginalTransactionId, OriginalTransactionDate, TransactionUTR, StoreId, StoreName,
+  TerminalId, TerminalName`). Note the header names differ from PhonePe's docs table,
+  and the docs' `Instrument` enum is the online/Switch vocabulary — real files use
+  `*_FULFILMENT` values. Parse by header name, never position.
+- Money: rupees (2 decimals); fee and taxes are negative-valued;
   `Settled amount = Amount + Fee + IGST + CGST + SGST`.
-- Why not wired: `PaymentType` values undocumented, date format undocumented →
-  resolve against a real file before building the parser.
-- Source: `developer.phonepe.com/docs/settlements`.
+- Wired: `load_phonepe_settlement_csv` aggregates rows per `BankReferenceNo` (the
+  settlement UTR) before matching. **One thing is still unverified:** the aggregate has
+  never been compared against a real bank credit for the same settlement.
+- Source: `developer.phonepe.com/docs/settlements`; real files in RESEARCH §2a/§2c.
 
-### Juspay — settlement file (verified schema, NOT wired)
+### Juspay — settlement file (WIRED, with its limits stated in the loader)
 
-- 25 cols: `Merchant ID, Transaction Amount, Fee, Tax, Credit, Debit, Settlement Date, UPI Request Id, Transaction Type, Type, SS Adjustment Type, SS Credit/Debit, Transaction Date, Account Number, Status, Payer Vpa, Payee Vpa, RRN, Settlement Status, Order ID, Transaction Description, Account Type, Sub Merchant ID, Refund Request Id, MCC`
-- Money: datatype "Integer"; paise vs rupees not stated → unverified → resolve
-  against a real file before wiring.
-- Date: `dd/mm/yyyy`.
-- Source: `juspay.io/pe/docs/upi-merchant-stack-pe/docs/resources/settlement-files`.
+- 25 cols (official): `Merchant ID, Transaction Amount, Fee, Tax, Credit, Debit,
+  Settlement Date, UPI Request Id, Transaction Type, Type, SS Adjustment Type,
+  SS Credit/Debit, Transaction Date, Account Number, Status, Payer Vpa, Payee Vpa, RRN,
+  Settlement Status, Order ID, Transaction Description, Account Type, Sub Merchant ID,
+  Refund Request Id, MCC`
+- Money: the docs say only "Integer"; Juspay's own production parser reads plain rupee
+  decimals → **rupees**, vendor-code corroboration, NOT documented.
+- Dates: `dd/mm/yyyy`. `Settlement Status ∈ {Sent for settlement, Settled, Pending, Failed}`;
+  only `Settled` means the funds reached the bank, and the loader filters on that.
+- Wired: `load_juspay_settlement_csv` nets rows per bank credit, grouping by `UTR Number`
+  when the header has one (the variant Juspay's own parser reads) and otherwise by
+  `Settlement Date` — the documented schema has **no** batch-id and **no** UTR column.
+- Still unverified on a real populated file: the rupee unit, one-date-equals-one-credit,
+  and the status filter. See the loader docstring.
+- Source: `juspay.io/pe/docs/upi-merchant-stack-pe/docs/resources/settlement-files`;
+  the vendor parser's header names are recorded in RESEARCH §3b (transcribed, never copied).
 
 ## Bank statements (wired)
 
@@ -126,10 +171,10 @@ Summary of what changed:
 | Target | Was | Now |
 |---|---|---|
 | **PhonePe settlement** | `None` — "tax columns + undocumented type values, real file needed" | **WIRED.** Two real publicly committed merchant exports exist (15-col and 23-col variants). Column names are verbatim above; `BankReferenceNo` is the settlement UTR. Because the file is per-transaction and a bank credit is per-settlement, `load_phonepe_settlement_csv()` nets `Amount + Fee + IGST + CGST + SGST` per `BankReferenceNo`. Tested against a synthetic fixture (`tests/fixtures/phonepe/`). **Caveat: the aggregate has never been checked against a real bank credit.** |
-| **Cashfree recon** | 48 columns | **63 columns.** A real (header-only) export proves it: section 1 is 14 cols with first header literally `Id`; section 2 is 63 (`Key_4..Key_10`, `Surcharge Amount`, `Tax on Surcharge`, `Payment Mode SubType`). Section marker: `** Settlement Reconciliation Details **`. Still needs a dedicated two-section parser — the `cashfree_recon_csv` map stays `None`. |
+| **Cashfree recon** | 48 columns | **63 columns.** A real (header-only) export proves it: section 1 is 14 cols with first header literally `Id`; section 2 is 63 (`Key_4..Key_10`, `Surcharge Amount`, `Tax on Surcharge`, `Payment Mode SubType`). Section marker: `** Settlement Reconciliation Details **`. **WIRED** (2026-09-11 session 15) — `load_cashfree_recon_report()` splits the file and reads each section through its own map; both maps are filled (`cashfree_settlement_csv`, `cashfree_recon_csv`) and the fixture's netted event total equals its batch total. |
 | **Cashfree plain settlements** | "not public" | Still absent, but the page-level doc confirms no per-column table exists → use the documented `GET /settlements` JSON API instead. |
-| **PayU settlement** | "needs a real dashboard export" | **Permanently un-findable as CSV** — the export's columns are user-selectable in a dashboard dialog, so no fixed public header can exist. Two *official APIs* have complete documented sample JSON (`/settlement/range`, `/settlement/transactionDetails`) → build API parsers, not a CSV map. |
-| **Juspay settlement** | "money unit unstated" | 25-column official schema page is fully fetchable (no JS wall) with enums and status maps. Money unit is still officially "Integer"; Juspay's own production parser reads the values as plain rupee decimals → **rupees**, verdict-corrobation. Map stays `None` until wired. |
+| **PayU settlement** | "needs a real dashboard export" | **Permanently un-findable as CSV** — the export's columns are user-selectable in a dashboard dialog, so no fixed public header can exist. Two *official APIs* have complete documented sample JSON (`/settlement/range`, `/settlement/transactionDetails`) → **WIRED as API parsers** (2026-09-11 session 15), not a CSV map; `payu_settlement_csv` stays `None` by design. |
+| **Juspay settlement** | "money unit unstated" | 25-column official schema page is fully fetchable (no JS wall) with enums and status maps. Money unit is still officially "Integer"; Juspay's own production parser reads the values as plain rupee decimals → **rupees**, verdict-corrobation. **WIRED** (2026-09-11 session 15) as `load_juspay_settlement_csv` — per-bank-credit netting, both file variants, with the rupee unit, the date-grouping for the no-UTR variant, and the status filter all still unverified against a real populated file. |
 | **IDFC** | No verified source | Confirmed: **no real IDFC file or official sample exists publicly** (four production PDF parsers corroborate the same text layout, but all four test against hand-written mock text, and the two community CSV claims contradict each other). The `idfc: None` entry is correct and should stay; the four source URLs are listed in the research doc so this search is not repeated. |
 
 ### Non-negotiables the research reinforced
