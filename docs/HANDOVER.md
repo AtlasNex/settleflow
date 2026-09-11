@@ -31,11 +31,14 @@ review found, including the deploy script that would overwrite the live database
 **deploy → remediate the Strix findings (ATL-242) → deploy again**, because the deploy target
 (`b14c87a`/`acc5275`) is a strict improvement over live but is not the end state.
 
-**One premise is unproven and it is the most important open question:** whether a caller can supply
-`CF-Connecting-IP` through the Cloudflare tunnel. If yes, the HIGH finding (ATL-242 / vuln-0010) is
-live right now — an unauthenticated caller can hold the single-worker instance at 100% of a core
-indefinitely and grow the database unbounded. If no, the finding is not exploitable as written.
-A live probe settles it; nothing local can.
+**One premise was unproven — now SETTLED (ATL-244, probe from outside + origin-side header echo):** a
+caller CANNOT supply `CF-Connecting-IP` through the Cloudflare tunnel; the edge 403s any request that
+carries one (error 1000). So vuln-0010's HIGH chain is broken on the deployed topology — but only as
+long as the origin keeps its 127.0.0.1 bind and tunnel-only ingress, so deploys must not regress that.
+`X-Forwarded-For` IS caller-controlled at the origin (client value passes through as first hop), and
+live v0.7.3 keys its rate limit on it — the bypass is live today; the fix (`pick_client_ip`,
+CCI-only) is in the repo. Evidence + repro:
+`E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`.
 
 **Strix is the new verification gate, but it is currently OUT OF CREDITS.** It found 12 issues
 (1 high, 5 medium) that our own 74-check self-check and the manual review both missed — including a

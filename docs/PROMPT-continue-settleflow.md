@@ -30,18 +30,24 @@ produces the workpapers a finance team files (Tally CSV, GST worksheet, TDS 1035
 
 ---
 
-## THE SINGLE MOST IMPORTANT OPEN QUESTION
+## THE SINGLE MOST IMPORTANT OPEN QUESTION — ANSWERED 2026-09-11 (ATL-244)
 
-**Can a caller supply `CF-Connecting-IP` through the Cloudflare tunnel?**
+**Can a caller supply `CF-Connecting-IP` through the Cloudflare tunnel?** → **No.** The Cloudflare
+edge 403s (error code 1000) any request carrying a client-supplied CCI before it reaches cloudflared;
+the origin sets it itself. Probed from outside AND at the origin with a header-echo listener over the
+real tunnel (evidence + repro: `../strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`).
 
-Everything about the severity of the HIGH finding turns on it. If yes, an unauthenticated caller can
-mint a fresh rate-limit bucket per request and compose that with per-request amplification (one
-8.5 MB upload inside every advertised limit = ~7 s service-wide stall, ~881 MB peak, ~72 MB durable
-DB growth; 4 concurrent = 28 s at a full core, `/health` answered 7 times, ~37 GB/h if sustained).
-If no, the finding is not exploitable as written.
-
-**Source review cannot answer this. A live probe from outside can.** Do that first if the deploy has
-happened — it is the highest-information five minutes available on this project.
+Consequences:
+- vuln-0010's HIGH chain is broken at its identity link **on the deployed topology** — Strix tested a
+  local instance with no Cloudflare in front. It closes again the moment the origin is ever exposed
+  directly, so deploys must keep the 127.0.0.1 bind + tunnel-only ingress.
+- **`X-Forwarded-For` IS caller-controlled at the origin**: the client's value passes through as the
+  FIRST hop, real IP appended (echo-proved). Live v0.7.3 keys its rate limit on first-hop XFF → the
+  bypass is LIVE today; the fix (`pick_client_ip`, CCI-only) exists only in the repo. Deploy urgency:
+  raised, with evidence, not just inertia.
+- The surviving real work: vuln-0002 per-request amplification (~7 s stall, ~72 MB durable DB per
+  in-limits upload) — unaffected by the probe — plus IPv6-natural CCI rotation, whose answer is the
+  same cost ceiling.
 
 ---
 
@@ -57,6 +63,9 @@ happened — it is the highest-information five minutes available on this projec
 - **Review reports (OUTSIDE the repo — they are abuse write-ups and the repo is public):**
   `E:/Sanjay Files/StartUp/open source/settleflow-review-2026-09-11-v2.md` (current, 234 lines)
   and `...-v1.md` (superseded).
+- **CF-Connecting-IP / XFF probe evidence + repro (also outside the repo, it names the ingress):**
+  `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`.
+  Reads like a live finding; it does not contain the origin address.
 - **Strix findings, durable copy (the CI artifact expires in 30 days):**
   `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/` — 19 files incl.
   `vulnerabilities.json`, 12 per-finding `.md`, `penetration_test_report.md`, `run.json`, SARIF.

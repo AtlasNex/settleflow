@@ -556,3 +556,18 @@ survived because the OSS component layer is genuinely un-owned.
 - **Rejected:** treating the HIGH as blocking all other work. It is one conditional chain in a
   system whose remaining fixes are independent and already verified.
 - **Model:** claude-opus-5. **Date:** 2026-09-11.
+
+### D-41: The CF-Connecting-IP premise is settled — CCI is unforgeable through the tunnel; the invariant to keep is tunnel-only ingress
+
+- **Decision.** Recorded from the ATL-244 live probe: the Cloudflare edge rejects (403, error code
+  1000) any request carrying a client-supplied `CF-Connecting-IP` before it reaches cloudflared, and
+  sets the header itself. `pick_client_ip` (CCI-only) is therefore sound **on this topology**, and
+  vuln-0010's HIGH chain does not close from outside. The binding invariant: the origin keeps its
+  127.0.0.1 bind and tunnel-only ingress — a future direct exposure re-arms the finding.
+- **Why it still matters.** XFF passes through with the caller's value as the FIRST hop (origin
+  echo-proved), so live v0.7.3's XFF-keyed limit is bypassable today; this decision raises deploy
+  urgency with evidence. It also re-ranks ATL-242: vuln-0002's work-bound fix is the top item, not
+  the identity fix.
+- **Evidence:** `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`
+  (kept outside the public repo; contains the ingress description, not the origin address).
+- **Model:** qwen3.8-flash. **Date:** 2026-09-11.
