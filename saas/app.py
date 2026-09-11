@@ -47,6 +47,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # so `import helpers` works
@@ -503,6 +504,19 @@ def _http_error(request: Request, exc: HTTPException) -> HTMLResponse:
     }
     return _error_page(request, exc.status_code, titles.get(exc.status_code, "Something went wrong"),
                        body, hints.get(exc.status_code))
+
+
+@app.exception_handler(StarletteHTTPException)
+def _http_error_starlette(request: Request, exc: StarletteHTTPException) -> HTMLResponse:
+    """Same page for Starlette's own HTTPException.
+
+    FastAPI's HTTPException subclasses Starlette's, and the handlers are matched by
+    exact class — so a raise coming from inside Starlette (the multipart parser's
+    "Part exceeded maximum size of 1024KB" is one) bypassed the handler above and
+    reached the client as raw framework JSON, which is exactly the traceback-adjacent
+    output a person must never meet. Delegating keeps one page and one set of hints.
+    """
+    return _http_error(request, exc)
 
 
 @app.exception_handler(Exception)

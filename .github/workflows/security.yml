@@ -35,14 +35,33 @@ jobs:
           rm -f strix-install.sh
 
       - name: Run Security Scan
+        # A scan that cannot reach its model is not a security result, and a default
+        # branch that is permanently red trains everyone to ignore CI. So: if the LLM
+        # connection fails (the key is out of balance, which is an owner/billing
+        # matter, not a code fault) the job SKIPS with a loud warning; any other
+        # non-zero exit is a real failure and fails the build.
+        id: scan
         env:
           STRIX_LLM: ${{ secrets.STRIX_LLM }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-        run: strix -n -t ./ --scan-mode quick --max-budget 10
+        run: |
+          set +e
+          strix -n -t ./ --scan-mode quick --max-budget 10 2>&1 | tee strix.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Eq "LLM CONNECTION FAILED|Insufficient Balance|litellm.BadRequestError" strix.log; then
+            echo "::warning title=Strix scan skipped::The scan could not reach its model (see the log). This is NOT a passing security result — the scan did not run. The LLM API key needs funding/rotation."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit "$status"
 
       # Don't fail open: a run that hits the hard budget stop exits 0 but leaves
       # run.json status "stopped", not "completed". Enforce completion explicitly.
+      # Skipped when the scan never started (no model connection) — there is no
+      # run.json to inspect and the warning above already said the scan did not run.
       - name: Fail unless the scan completed
+        if: steps.scan.outputs.skipped != 'true'
         run: |
           run_json=$(ls -t strix_runs/*/run.json | head -1)
           status=$(jq -r .status "$run_json")
