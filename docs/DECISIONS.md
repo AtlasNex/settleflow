@@ -490,3 +490,69 @@ survived because the OSS component layer is genuinely un-owned.
   which needs the deploy script's path allowlist changed by hand, and a rename that drifts is how a
   live service quietly stops being deployable. It lands as D-38 when it is done.
 - **Model:** deepseek-v4.1-flash. **Date:** 2026-09-11.
+
+### D-38: Strix is the independent security gate, and a gate that finds issues must FAIL
+
+- **Decision.** The Strix OSS CLI runs in `.github/workflows/security.yml` as this project's
+  independent security gate, on `pull_request`, on `push` to `master` (the branch we actually deploy
+  from — `pull_request`-only was watching a door nobody uses), and on `workflow_dispatch`. Exit
+  code **2 (vulnerabilities found) fails the build**; artifacts are uploaded on both paths so a
+  failing gate is always actionable.
+- **Why the exit-2 branch is load-bearing.** The first version only echoed a `::warning` and fell
+  through. The first real scan then concluded **success** while its artifact held 12 findings
+  (1 high, 5 medium). A gate that finds issues and reports success is worse than no gate: it
+  manufactures false assurance, and it teaches everyone to ignore CI. The rule is general — a
+  security gate's pass must mean *no findings*, never *the job didn't error*.
+- **Why an independent scanner at all.** It found a latent `NameError` in a shipped SBI parser, a
+  `Date`-boolean-to-money path, and CSV formula injection surviving a leading `-` — none of which
+  our own 74-check self-check or the in-session manual review caught. The self-check asserts what we
+  thought to assert; an adversarial scanner tests what we didn't.
+- **Consequence.** A green security run is a claim about *what was analysed*, not a statement that
+  the project is secure — and it must be read via the artifacts, not the conclusion. The artifact
+  expires after 30 days, so findings get a durable copy outside the repo.
+- **Model:** claude-opus-5. **Date:** 2026-09-11.
+
+### D-39: Strix runs on CommandCode via `LLM_API_BASE`, and not on a thinking-mode model
+
+- **Decision.** `STRIX_LLM=openai/zai-org/GLM-5.3`, `LLM_API_BASE=https://api.commandcode.ai/provider/v1`,
+  `LLM_API_KEY` from the `COMMANDCODE_API_KEY` repository secret. The model id is not a secret and
+  lives in the workflow file where it is reviewable.
+- **Why not a direct vendor key.** The configuration inherited from the skill used a direct
+  `deepseek` key with no balance, so every run died at `LLM CONNECTION FAILED` and `master` was red
+  for a billing reason, having scanned nothing. CommandCode is the OpenAI-compatible gateway already
+  configured in Hermes, so it needs no new account or secret beyond the key Hermes already holds.
+- **The env var name is `LLM_API_BASE`** — the documented one. `OPENAI_BASE_URL`/`OPENAI_API_BASE`
+  are not read.
+- **Why GLM-5.3 and not deepseek-v4.1-flash.** deepseek-runs in **thinking mode**, and Strix's
+  OpenAI client does not pass `reasoning_content` back on the follow-up turn: the gateway's fallback
+  path dies with `400 "The reasoning_content in the thinking mode must be passed back to the API."`,
+  usually preceded by a `429 Provider is at capacity` on the first attempt. That is structural, not
+  transient — the first scan succeeded only because its first provider attempt happened to land, and
+  the next one failed after 27 minutes. GLM-5.3 is Strix's own documented default and was verified
+  against this endpoint (200, `finish_reason=tool_calls`, correct arguments) before wiring; Strix is
+  entirely tool-driven, so real tool calls matter more than a chat reply.
+- **Verified-working substitutes** if it needs swapping: `moonshotai/Kimi-K3`, `Qwen/Qwen3.8-Max`,
+  `xiaomi/mimo-v2.5-pro`. **Plan-gated, do not use:** `claude-sonnet-5`, `gpt-5.5`
+  (both `403 MODEL_NOT_IN_PLAN`).
+- **Consequence.** Sanjay's standing "no deepseek for agentic work" rule turned out to be right for
+  a reason nobody had articulated: the thinking-mode round-trip breaks the client.
+- **Model:** claude-opus-5. **Date:** 2026-09-11.
+
+### D-40: The Strix findings come BEFORE the deploy, but the deploy is still worth doing first
+
+- **Decision.** The deploy target (`acc5275`) ships as-is once Sanjay authorises it, and ATL-242 is
+  remediated as the next unit of work, followed by a second deploy. Ordering is deliberate:
+  **deploy → remediate → deploy**, not "remediate everything then deploy once".
+- **Why deploy first, given a HIGH is open.** The live build is strictly worse: it additionally
+  lacks the whole-request size cap and keys the rate limit on caller-controlled input, so it carries
+  every defect in ATL-242 *plus* the ones already fixed. Deferring the deploy to fix the HIGH leaves
+  the exposed build in place for longer. Deploying is a strict reduction in exposure, not a
+  regression.
+- **The premise that decides severity, and how it is settled.** vuln-0010's exploitability rests on
+  whether a caller can supply `CF-Connecting-IP` through the Cloudflare tunnel. Source review cannot
+  observe that; only a live probe from outside can. Until it is probed, the finding is stated as
+  conditional rather than as a live incident. If it IS reachable, the rate-limit fix (D-38's sibling
+  work) and the identity-independent ceiling become the top priority, ahead of everything else.
+- **Rejected:** treating the HIGH as blocking all other work. It is one conditional chain in a
+  system whose remaining fixes are independent and already verified.
+- **Model:** claude-opus-5. **Date:** 2026-09-11.

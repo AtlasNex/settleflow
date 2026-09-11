@@ -21,7 +21,28 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 ## Current state (2026-09-11)
 
-### Session 16 — the end-to-end review, and every finding fixed
+### ⚠️ READ THIS FIRST — where the session ended
+
+**Nothing is deployed. The live service still runs the pre-fix v0.7.3 (165 runs).** Eight commits sit
+in the repo, tested, pushed, CI green — and inert. The deployed copy still contains every defect the
+review found, including the deploy script that would overwrite the live database on its next run.
+
+**One decision is outstanding and it is Sanjay's:** whether to deploy. Recommended sequence is
+**deploy → remediate the Strix findings (ATL-242) → deploy again**, because the deploy target
+(`b14c87a`/`acc5275`) is a strict improvement over live but is not the end state.
+
+**One premise is unproven and it is the most important open question:** whether a caller can supply
+`CF-Connecting-IP` through the Cloudflare tunnel. If yes, the HIGH finding (ATL-242 / vuln-0010) is
+live right now — an unauthenticated caller can hold the single-worker instance at 100% of a core
+indefinitely and grow the database unbounded. If no, the finding is not exploitable as written.
+A live probe settles it; nothing local can.
+
+**Strix is the new verification gate.** It found 12 issues (1 high, 5 medium) that our own
+74-check self-check and the manual review both missed — including a latent `NameError` in a shipped
+SBI parser. Treat a green security run as meaningful only after reading the artifacts, and note the
+artifact expires in 30 days (a durable copy lives outside the repo).
+
+### Session 16 — the end-to-end review, every finding fixed, and Strix as a second opinion
 
 A critical review was run in-session (no delegation): `settleflow-review-2026-09-11-v2.md`, kept
 OUTSIDE the repo because it is an abuse write-up and this repo is public. It reproduced nine

@@ -506,3 +506,100 @@ now covered by direct work, but nothing of theirs was used.
 canary 5/5 on the live service (which still runs the pre-fix 0.7.3 — nothing was deployed this
 session). Board: ATL-234 (review, in_review), ATL-235 (critical deploy + abuse, corrected),
 ATL-237 (library/CLI correctness), ATL-238 (this remediation).
+
+## Session 16 (continued) — 2026-09-11 — Strix as an independent second opinion, and the gate that lied
+
+Picked up after the v2 review and its remediation (previous entry). Sanjay: *"Use commandcode for
+strix security thing"*, then *"Use deepseek v4.1 flash from commandcode"*, then *"is strix done?"*,
+then *"Devise out a plan to finish the remaining tasks"*.
+
+### What the Strix work actually produced
+
+**A working security gate that had never run, and then a finding that the gate itself was lying.**
+
+Wiring: `STRIX_LLM` now points at CommandCode (the OpenAI-compatible gateway already configured in
+Hermes) via **`LLM_API_BASE`** — the documented env var, not `OPENAI_BASE_URL`. The first attempt
+followed the shipped skill verbatim, which configures a direct vendor key and no base URL, and the
+inheritied `deepseek` key had **no balance** — so every run died at `LLM CONNECTION FAILED` and
+`master` was red for a billing reason, having scanned nothing.
+
+Model selection was done on evidence, not preference:
+- `claude-sonnet-5`, `gpt-5.5` → **403 MODEL_NOT_IN_PLAN** on this CommandCode plan.
+- `deepseek/deepseek-v4.1-flash` → 200 with real tool calls, so it was wired first.
+- It then **failed mid-scan** (run `34600087325`, 27 min): `400 "The reasoning_content in the
+  thinking mode must be passed back to the API"`, preceded by `429 Provider is at capacity`. That is
+  a thinking-mode model against a client that does not round-trip `reasoning_content` — structural,
+  and it surfaces on the *retry*, so the first run (49 min, 12 findings) succeeded only because its
+  first provider attempt happened to land. Swapped to **`zai-org/GLM-5.3`** (Strix's own documented
+  default, verified 200 + `finish_reason=tool_calls`). Verified-working substitutes if needed:
+  `moonshotai/Kimi-K3`, `Qwen/Qwen3.8-Max`, `xiaomi/mimo-v2.5-pro`.
+
+**The finding that matters most: the gate reported success while hiding 12 vulnerabilities.**
+Run `34595883781` (49 min, on `b14c87a`) concluded **success** while the artifact held
+**12 findings — 1 high, 5 medium, 5 low, 1 info**. Cause: the `case` branch for exit code 2 only
+echoed a `::warning` and fell through. A security gate that finds issues and reports success is
+worse than no gate, because it manufactures false assurance. Fixed in `264c254` (exit 2 now fails).
+
+**Findings (durable copy: `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/`, 19
+files, 2.6 MB — the CI artifact expires in 30 days; also filed as ATL-242).**
+
+Independently reproduced by us, so these are facts not claims:
+- `parse_sbi_netbanking` uses `date.today()` but `pdf.py` imports only `re` + `pymupdf` →
+  **`NameError: name 'date' is not defined`** on an SBI netbanking statement with no recoverable
+  year. A latent crash in a shipped parser that 74 self-checks never touched.
+- `_paise(True) -> 0.01`, `_paise(False) -> 0` — a JSON boolean silently priced as money.
+- CSV formula injection **survives for a leading `-`**: `'-2+3'` is written unneutralised, while
+  `=`, `+`, `@` are defused. Our own code comment called leaving `-` alone deliberate; Strix is
+  right and the rationale was wrong (`-2+3` evaluates in Excel).
+- `POST /r/{token}/notify` (`saas/app.py:1129`) has **no rate limit** and writes an unpruned
+  `leads` row per call; the required token is free from the unauthenticated reconcile endpoint.
+
+Not yet reproduced (recorded as unverified, NOT as fact): 0006 (quadratic narration reassembly),
+0008 (money bound skipped in text/SBI parsers), 0011 (notify email recipient injection),
+0012 (PDF/OCR resource exhaustion), 0003 (some malformed inputs still 500).
+
+The **HIGH** (0010) is an availability chain: the rate-limit identity is caller-supplied, and one
+8.5 MB upload inside every advertised limit blocks the single worker ~7 s, allocates ~881 MB peak
+and writes ~72 MB durably. Measured: 4 concurrent worst-case requests with rotating identity → 28 s
+at a full core, `/health` answered 7 times, DB +289 MB (~37 GB/h if sustained). **Whether a caller
+can supply `CF-Connecting-IP` through the Cloudflare tunnel is the premise, and only a live test
+settles it.** That is the single most important open question from this scan.
+
+What the scan **confirmed as already solid** (it tried to refute and failed): the whole-request size
+cap added earlier this session, per-run token authorization, template auto-escaping, export-route
+SQL — and no SQL injection, XSS, SSRF, XXE, deserialization or path traversal anywhere. Its own
+summary: confidentiality and auth controls are strong, **resource bounding is the weakness**.
+
+### Deploy recommendation revised
+
+`b14c87a` was intended to be the deploy target. It is still a **strict improvement** over live
+(the live build additionally lacks the whole-body cap and has the spoofable rate-limit identity),
+but it is **no longer the end state**: the HIGH is reachable on it. Sequence becomes
+**deploy → remediate ATL-242 → deploy again**, not one deploy closing the security work. Still
+Sanjay's call; nothing was deployed.
+
+### Discipline notes (things done or caught late)
+
+- A commit message asserted the >1 MB field returned the branded page. It did not — raw framework
+  JSON, because FastAPI matches exception handlers by exact class and the multipart parser raises
+  *Starlette's* exception. Fixed properly, then re-verified.
+- Enabling the scan on `master` turned it red for a billing reason; the gate now distinguishes
+  "did not run" from "found nothing", which are otherwise indistinguishable from outside.
+- The `case` exit-2 branch was written to warn rather than fail. Caught only because a real run
+  produced real findings.
+- The 3-subagent delegation dispatched at 05:31 finally reported at the end of the session:
+  `outcome unknown — delegation owner exited before recording a terminal result`. As suspected, it
+  delivered nothing. Not re-dispatched: the review it fed was redone in-session, and Strix has since
+  supplied the independent second opinion it was meant to be.
+
+### State at close
+
+- Repo clean at **`acc5275`** (8 commits this session), pushed, CI green.
+- `hermes verify --skip-start` → `ok: true`, bootstrap exit 0, test exit 0, **all 74 checks passed**,
+  port 8000 clear before and after.
+- Live service untouched at **v0.7.3, 165 runs** (was 147 at session start — ~96/day).
+- GLM-5.3 scan `34604701290` in flight at close.
+- Board: ATL-234/235/237/238 `in_review`; **ATL-241** (plan to finish, `in_review`); **ATL-242**
+  (the 12 Strix findings, `todo`); ATL-218 `blocked` (owner-gated); ATL-230 `todo` (rename).
+- Skill `ci-security-scanning-with-strix` corrected: `LLM_API_BASE`, the three failures that
+  masquerade as auth errors, the thinking-mode incompatibility, and the gate-killers.
