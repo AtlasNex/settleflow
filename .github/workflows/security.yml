@@ -7,6 +7,7 @@ on:
   pull_request:
   push:
     branches: [master]
+  workflow_dispatch:
 
 # Least privilege: the scan needs to read the repo, nothing else. Without this the
 # job inherits the repository default, which may be read-write for every scope.
@@ -22,7 +23,7 @@ jobs:
           fetch-depth: 0   # required for diff-scope resolution
 
       - name: Install Strix (pinned to a release tag)
-        # Pinned deliberately. This step runs with the LLM secrets below in scope, so
+        # Pinned deliberately. This step runs with the LLM key below in scope, so
         # `curl <moving-url> | bash` would let an upstream change execute here without
         # a reviewable commit in this repo. The tag and the VERSION pin below both
         # point at v1.6.2 (the release published 2026-09-05), and the installer honours
@@ -35,33 +36,59 @@ jobs:
           rm -f strix-install.sh
 
       - name: Run Security Scan
-        # A scan that cannot reach its model is not a security result, and a default
-        # branch that is permanently red trains everyone to ignore CI. So: if the LLM
-        # connection fails (the key is out of balance, which is an owner/billing
-        # matter, not a code fault) the job SKIPS with a loud warning; any other
-        # non-zero exit is a real failure and fails the build.
+        # The model is CommandCode (an OpenAI-compatible gateway), not a direct
+        # vendor key: the previous configuration pointed at a DeepSeek key with no
+        # balance, so every run died at "LLM CONNECTION FAILED" and the job was red
+        # for a billing reason rather than a security one.
+        #
+        # Model: deepseek/deepseek-v4.1-flash on CommandCode, verified against this
+        # endpoint before wiring (HTTP 200, finish_reason=tool_calls, correct tool
+        # arguments) — Strix is entirely tool-driven, so real tool_calls matter more
+        # than a chat reply. Model substitutions checked on this plan: claude-sonnet-5
+        # and gpt-5.5 return 403 MODEL_NOT_IN_PLAN; zai-org/GLM-5.3, moonshotai/Kimi-K3
+        # and Qwen/Qwen3.8-Max also work if this one needs swapping. The model id is
+        # not a secret, so it lives here.
+        #
+        # Exit codes: 0 = finished clean, 1 = fatal error, 2 = vulnerabilities found.
         id: scan
         env:
-          STRIX_LLM: ${{ secrets.STRIX_LLM }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          STRIX_LLM: openai/deepseek/deepseek-v4.1-flash
+          LLM_API_BASE: https://api.commandcode.ai/provider/v1
+          LLM_API_KEY: ${{ secrets.COMMANDCODE_API_KEY }}
         run: |
           set +e
           strix -n -t ./ --scan-mode quick --max-budget 10 2>&1 | tee strix.log
           status=${PIPESTATUS[0]}
           set -e
-          if grep -Eq "LLM CONNECTION FAILED|Insufficient Balance|litellm.BadRequestError" strix.log; then
-            echo "::warning title=Strix scan skipped::The scan could not reach its model (see the log). This is NOT a passing security result — the scan did not run. The LLM API key needs funding/rotation."
-            echo "skipped=true" >> "$GITHUB_OUTPUT"
-            exit 0
+
+          if grep -Eq "LLM CONNECTION FAILED|Insufficient Balance|MODEL_NOT_IN_PLAN|litellm.BadRequestError" strix.log; then
+            echo "::error title=Strix scan did not run::The scan could not reach its model. This is NOT a passing security result — no scan happened. Check the COMMANDCODE_API_KEY secret and the plan's model access."
+            exit 1
           fi
-          exit "$status"
+
+          case "$status" in
+            0) echo "scan finished with no validated findings in the analysed scope" ;;
+            1) echo "::error title=Strix scan failed::fatal error (missing env, Docker down, bad config)"; exit 1 ;;
+            2) echo "::warning title=Strix found vulnerabilities::see the uploaded artifacts"; echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error title=Strix scan ended unexpectedly::exit $status"; exit "$status" ;;
+          esac
+
+      # Findings were invisible before: strix_runs/ died with the runner, so a red
+      # job told you nothing. Always upload, so a failing gate is actionable.
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strix-runs
+          path: strix_runs/
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Don't fail open: a run that hits the hard budget stop exits 0 but leaves
-      # run.json status "stopped", not "completed". Enforce completion explicitly.
-      # Skipped when the scan never started (no model connection) — there is no
-      # run.json to inspect and the warning above already said the scan did not run.
+      # run.json status "stopped", not "completed". Enforce completion explicitly —
+      # and only when a scan actually ran.
       - name: Fail unless the scan completed
-        if: steps.scan.outputs.skipped != 'true'
+        if: always() && hashFiles('strix_runs/*/run.json') != ''
         run: |
           run_json=$(ls -t strix_runs/*/run.json | head -1)
           status=$(jq -r .status "$run_json")
