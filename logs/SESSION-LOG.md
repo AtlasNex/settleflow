@@ -454,3 +454,55 @@ PhonePe's per-settlement aggregate still unjoined to a real bank credit.
 
 **Named later in this same session:** Sanjay chose **Conjunction** as the product name (D-37), and
 the rename plan is in `docs/NAMING-SHORTLIST.md` — planned, deliberately not executed.
+
+## Session 16 — 2026-09-11 — the review, then every finding fixed
+
+Sanjay: *"do a very rigorous, critical review of entire Conjunction/SettleFlow… give me a very
+detailed report"*, then *"Fix all"*.
+
+**The review.** v1 of the report leaned on three parallel subagent reviews; they ran past the
+session boundary and died without delivering, so v1 was triage of transcript fragments plus spot
+checks, and two of its claims outran the evidence. Sanjay pushed back (*"I don't think the review
+happened properly. do it again"*) and v2 was run entirely in-session: ~230 HTTP requests against an
+isolated local copy, 10 matching edge cases, 6 hash seeds for determinism, 19 hostile
+`parse_amount` inputs, 15 `parse_date` inputs, 13 malformed-payload cases, a 50k+50k scale run, an
+8-way concurrency test, 20k token draws, and a factual-claim sweep of all 17 doc files.
+`settleflow-review-2026-09-11-v2.md` holds it, deliberately OUTSIDE the repo (it is an abuse
+write-up and this repo is public).
+
+**v1 claims retracted in v2, two of them my own errors:** the "58MB spooled -> disk exhaustion"
+impact (measured 0 MB disk and 0 MB RSS on a 210 MB request — the request was accepted, the
+resource cost was not demonstrated); the run-page header conclusion (my probe used a
+case-sensitive lookup; re-verified case-insensitively as correct); and a mid-review
+"concurrency cross-contamination" finding that I disproved before publishing — it was `'100'` vs
+`'100.00'` formatting. v1 also claimed the happy path "works end to end" while its own probe had
+printed `location=None` and never fetched the page; v2 actually fetched it.
+
+**Then all of it was fixed**, nine findings plus the minor ones, self-check 64 -> 74:
+
+| Fix | Evidence |
+|---|---|
+| deploy/rollback no longer ship `saas/*.db` or `.deploy.env`; a tripwire fails the deploy if the run count drops | exact tar membership shows zero db/env entries; remote quoting proved with a stub `ssh`; the tripwire's extraction + verdicts tested against 4 synthetic health bodies |
+| rate limit keyed on CF-Connecting-IP only | rotating `X-Forwarded-For`: was 70 ok / 0 rejected, now 60 ok / 10 rejected |
+| whole-body request cap | 25MB of unnamed parts was 303, now 413 (via curl; urllib reports an abort on early rejection) |
+| `parse_amount` strict; non-finite and absurd money refused | `'Rs.100'` was `Decimal('0.100')`, now `Decimal('100')`; `NaN`/`Infinity`/`1e400`/`1_000`/`١٢٣` all raise |
+| wrong-shaped payloads are 400, not 500 | all 8 malformed cases now 4xx (was 4 x 500) |
+| CLI refuses a JSON settlement file instead of reporting zero rows | exit 2 with a message on stderr (was exit 0, `settlements : 0`) |
+| `exceptions.csv` via csv.writer; CRLF no longer doubled | comma-in-narration rows aligned; no CR-CRLF bytes |
+| `match()` linear on duplicate UTRs | 8k: 0.655s -> 0.033s (20x); linear to 32k |
+| exports defuse leading `=`/`+`/`@`; money formatting unified | formula cell now quoted-defused; page and CSV agree at `100.00` |
+| hosted service exposes all six wired formats | all six kinds accepted (303) against a local boot |
+| docs: ROLLBACK/README/BUG/ARCHITECTURE/TESTING/MASTER-PLAN/CONSTRAINTS + 6 stale test counts | every count now says "the command prints it" |
+| CI: security scan runs on master too, least-privilege token, installer pinned to the real v1.6.2 tag | `usestrix/strix` v1.6.2 verified to exist and resolve |
+
+**Two honest notes about this session's process.** (1) I wrote a made-up commit SHA into the
+security workflow's pinned installer URL, caught it before committing, verified the real project
+(`usestrix/strix`) and pinned to the actual release tag `v1.6.2` instead. A fabricated pin is worse
+than no pin. (2) The three subagents never delivered; do not read their absence as their having
+found nothing — their assignments (docs vs reality, core-library adversarial, hosted security) are
+now covered by direct work, but nothing of theirs was used.
+
+**State at close:** HEAD is the fix series; self-check 74 checks; zero-dependency core green;
+canary 5/5 on the live service (which still runs the pre-fix 0.7.3 — nothing was deployed this
+session). Board: ATL-234 (review, in_review), ATL-235 (critical deploy + abuse, corrected),
+ATL-237 (library/CLI correctness), ATL-238 (this remediation).

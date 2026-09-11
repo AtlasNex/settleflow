@@ -8,7 +8,8 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Project root: `E:/Sanjay Files/StartUp/open source/settleflow`
 - Package: `settleflow/` (models.py, matching.py, parsers.py, exports.py,
   exceptions.py, schemas.py, pdf.py, ocr.py, `__main__.py` = CLI)
-- Tests: `tests/test_matching.py` (assert-based self-check, 64 checks) +
+- Tests: `tests/test_matching.py` (assert-based self-check; 74 checks today — it prints the
+  count, so trust the command) +
   `tests/fixtures/{sbi,kotak,pnb,dbs}/` (real anonymised statement text, NOTICE.md) and
   `tests/fixtures/{phonepe,cashfree,payu,juspay}/` (synthetic rows on real verbatim headers)
 - SaaS: `saas/app.py` + `saas/templates/` + `saas/requirements.txt` + sample files
@@ -19,6 +20,27 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
   licensing) + `funding.json` + `.github/FUNDING.yml`
 
 ## Current state (2026-09-11)
+
+### Session 16 — the end-to-end review, and every finding fixed
+
+A critical review was run in-session (no delegation): `settleflow-review-2026-09-11-v2.md`, kept
+OUTSIDE the repo because it is an abuse write-up and this repo is public. It reproduced nine
+findings plus minor ones, and **all of them are now fixed**; self-check 64 -> 74.
+
+The one that mattered most was not a code path: `scripts/deploy.sh` tarred `saas/settleflow.db`
+over the server's database on every deploy, so the next deploy would have replaced **147 live
+runs** (and every captured lead) with this machine's local file, while the script reported
+success. The exclusion is fixed and a tripwire now fails the deploy if the live run count ever
+drops. Also fixed: the rate limit was bypassable by one header (70 requests claiming 70 addresses:
+70 accepted), the advertised 10MB cap bounded only the two named files (a 210MB request was
+accepted), `parse_amount('Rs.100')` returned `Decimal('0.100')` — a 1000x understatement with no
+error — malformed payloads were 500s, the CLI reported a clean run on a file it could not read,
+`exceptions.csv` misaligned on a comma, `match()` was quadratic on duplicate UTRs, and exports
+carried spreadsheet formula injection.
+
+**Nothing was deployed this session.** The live service still runs the pre-fix 0.7.3, verified
+green by the canary on the old code — so the fixes exist in the repo, tested locally, and shipping
+them is a deliberate next step rather than something that happened quietly.
 
 ### ✅ RESOLVED — the name is **Conjunction**; the rename is planned, not executed
 
@@ -120,7 +142,7 @@ Git history (recent head): `a73c1df` v0.7.3 OCR+Docker, `aef79db` port 8093,
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py            # self-check, 42 checks
+python tests/test_matching.py            # the self-check (prints the number of checks)
 
 # CLI — one-command reconciliation:
 python -m settleflow reconcile \

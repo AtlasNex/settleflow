@@ -106,7 +106,8 @@ are safe and reversible; step 4 is the one that can take the site down.
 
 **Phase 1 — inside the repo (one commit per step, self-check green between each)**
 3. Rename the package directory `settleflow/` → `conjunction/` and update `tests/test_matching.py`'s
-   `sys.path` + imports. Verify: `python tests/test_matching.py` → 64 checks.
+   `sys.path` + imports. Verify: `python tests/test_matching.py` → all checks pass (the
+   count is printed; it was 74 when this plan was written).
 4. `pyproject.toml`: `name`, the console-script entry point, and the wheel/pyproject metadata.
    Verify: build the wheel and install it in a clean venv, then run the CLI's `--help`.
 5. Prose sweep: `README.md`, `MASTER-PLAN.md`, `brand-context.md`, `docs/**`, `AGENTS.md`,

@@ -78,7 +78,7 @@ Level 1 is built and tested. Level 2 is the immediate next increment; the Razorp
 | Exports: Tally CSV, GST worksheet, TDS-1035 worksheet | `settleflow/exports.py` | done |
 | Exception classifier + LLM-prompt builder (Phase 5) | `settleflow/exceptions.py` | done |
 | Thin SaaS: FastAPI reconcile/expose/export (Phase 4) | `saas/app.py` + templates | done |
-| Self-check (18 checks, assert-based, no framework) | `tests/test_matching.py` | done |
+| Self-check (assert-based, no framework) | `tests/test_matching.py` | done |
 
 ## 6. Roadmap
 
@@ -86,7 +86,7 @@ Level 1 is built and tested. Level 2 is the immediate next increment; the Razorp
 |---|---|---|---|
 | 1 | scaffold + data model + matching + Razorpay parser + self-check | - | done |
 | 2 | line-item decomposition (Razorpay Fetch Recon schema) | 1 | done |
-| 3 | more parsers: Cashfree, PayU, PhonePe, Juspay + bank statements | real sample files | done for Razorpay + 5 banks (see `docs/SCHEMAS.md`); Cashfree/PhonePe/Juspay/PayU DEFERRED (ambiguities + dedicated parsers) |
+| 3 | more parsers: Cashfree, PayU, PhonePe, Juspay + bank statements | real sample files | done — Razorpay (CSV + API), PayU's two settlement APIs, PhonePe, Juspay and Cashfree's two-section recon are all wired; IDFC statements and Cashfree's plain settlements export remain deferred for want of a real sample (see `docs/SCHEMAS.md`) |
 | 4 | thin hosted SaaS: ingest, exception queue, Tally/GST/TDS-1035 exports | 3 | done (local; hosting deferred) |
 | 5 | exception classifier + optional LLM triage hook | 4 | done (rules + prompt builder; LLM call is a SaaS-layer concern) |
 
@@ -150,5 +150,5 @@ explicit column mapping, assert-based self-check (no pytest), MIT, private until
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-python tests/test_matching.py     # self-check, 7 checks
+python tests/test_matching.py     # the self-check (prints the number of checks)
 ```

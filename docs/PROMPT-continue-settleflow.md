@@ -71,7 +71,7 @@ for the parser specs. Do not re-run the searches recorded there.
 - **Deploy:** `bash scripts/deploy.sh` — idempotent, refuses to ship on a red self-check, backs up,
   restarts, then asserts `/health` **and** runs the end-to-end canary on the server **and** checks the
   public URL. Rollback: `bash scripts/rollback.sh latest`.
-- **Verify:** `python tests/test_matching.py` (52 checks, the canonical gate) ·
+- **Verify:** `python tests/test_matching.py` (the canonical gate — it prints the check count) ·
   `python tests/test_zero_dependency_core.py` · `python scripts/canary.py --base <url>` ·
   `hermes verify --skip-start --json` (see the pitfall below before trusting the start phase).
 - **Board:** Multica project **SettleFlow** `1e5c2be2-9967-46b5-8958-4275b73b6ad5`, agent **Hermes PM**

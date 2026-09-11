@@ -25,7 +25,7 @@ the owner can supply) · **SKIPPED** (deliberately not done).
 | 7 | Auto-detect columns + Advanced | **DONE** | `guess_columns()` (exact match beats substring; short patterns like `cr` excluded to avoid matching `Description`). 3 new self-checks. Live run with headers `Value Date, Narration, UTR No, Credit` auto-mapped correctly. |
 | 8 | Hide `/docs` | **DONE** | `docs_url=None, redoc_url=None, openapi_url=None`; all three 404 live. |
 | 9 | Human error messages | **DONE** | `HTTPException` handler + catch-all handler with a logged reference id. Verified: 400 (bad file/columns), 404 (unknown/expired run), 413 (too big), 429 (rate limit) all render the error template. |
-| 10 | Self-check grows, stays green | **DONE** | 42 → **50 checks**, plus new `tests/test_zero_dependency_core.py`. `python tests/test_matching.py` → `all 50 checks passed`. |
+| 10 | Self-check grows, stays green | **DONE** | 42 → **50 checks** at the time, plus new `tests/test_zero_dependency_core.py`. The count has kept growing (see `docs/HANDOVER.md` for the current figure) — the command prints it, so trust the command. |
 
 ## Phase 3 — Public surface
 

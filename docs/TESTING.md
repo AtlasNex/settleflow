@@ -12,7 +12,10 @@ python tests/test_matching.py
 Exit 0 = all green. It is a plain assert-based script (no framework, by design — see
 `docs/DECISIONS.md` D-8).
 
-## What is covered (27 checks)
+## What is covered
+
+The suite is `python tests/test_matching.py`; it prints `all N checks passed` and the
+count grows with the project, so run it rather than trusting a number written here.
 
 | Check | What it proves |
 |---|---|
@@ -58,12 +61,13 @@ cd "E:/Sanjay Files/StartUp/open source/settleflow"
 python -m uvicorn saas.app:app --host 127.0.0.1 --port 8091
 # in another shell:
 curl http://127.0.0.1:8091/health                                   # {"status":"ok"}
-curl -X POST http://127.0.0.1:8091/reconcile \
-  -F settlement_file=@saas/sample_settlements.json \
-  -F bank_file=@saas/sample_bank.csv \
+curl -i -X POST http://127.0.0.1:8091/reconcile \
   -F settlement_kind=razorpay_settlements \
-  -F bank_utr_col=utr -F bank_amount_col=amount -F bank_date_col=date
-# -> run_id, matched/settlement_only/bank_only counts, export URLs
+  -F settlement_file=@saas/sample_settlements.json \
+  -F bank_file=@saas/sample_bank.csv
+# -> HTTP 303 with Location: /r/<run_token>. There is no JSON body: the run URL IS
+#    the credential, so it belongs in the URL bar rather than a response payload.
+#    GET that Location for the summary and the export links.
 ```
 
 ## What is NOT yet covered (known gaps)

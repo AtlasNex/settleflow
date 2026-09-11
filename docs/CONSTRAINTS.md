@@ -49,10 +49,22 @@ paired with its reason (full reasoning in `docs/DECISIONS.md`).
 ## Known ceilings (marked for upgrade)
 
 - `match()`'s amount+date fallback can mis-pair when two distinct bank lines share the
-  same (amount, date). This is a deliberate first-pass simplification; the upgrade path
-  is UTR-based disambiguation or order-level matching (Phase 2, now built via
-  `match_orders`).
+  same (amount, date). It is reported as `AMOUNT_DATE`, never as `EXACT`, so a human
+  sees it; the upgrade path is UTR-based disambiguation or order-level matching
+  (Phase 2, built via `match_orders`).
+- **Fixed 2026-09-11:** `match()` and `match_orders()` used to rescan their candidate
+  list per row, so a file where many rows share one UTR (one RRN paying out a batch)
+  went quadratic — 8k rows took 0.655s and each doubling cost ~4x. Consumption is now
+  per-key queues and a self-check asserts 40k rows stay under a wall-clock bound. If
+  you change the consumption logic, that check is the guard.
 - PDF bank statements: the modern SBI YONO, the legacy netbanking, and the
-  credit-card layouts are all parsed (`settleflow/pdf.py`, D-21/D-23). Still
-  deferred: scanned/image-only PDFs (`PdfScannedError`; handled via the optional `[ocr]`
-  extra — Tesseract, D-27 — when installed, the native parser runs on the recovered text).
+  credit-card layouts are all parsed (`settleflow/pdf.py`, D-21/D-23). Scanned/image-only
+  PDFs raise `PdfScannedError` and are handled by the optional `[ocr]` extra (Tesseract,
+  D-27) when installed.
+- **Money entry is strict on purpose.** `parse_amount` accepts ASCII digits, an optional
+  sign and decimals, with an optional `INR`/`Rs.`/`₹` prefix, and refuses everything else
+  — including `NaN`, `Infinity`, `1_000` and non-ASCII digits — and `_validate_money`
+  bounds magnitude and decimal places. This is stricter than `Decimal()` and it is
+  deliberate: a looser version silently returned a rupee amount 1000x too small for
+  `'Rs.100'` and let non-finite values reach the exporters' `quantize()`, turning input
+  into a crash. Do not relax it to "parse more" without a specific real file that needs it.

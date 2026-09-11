@@ -1,7 +1,17 @@
 name: Security Scan
 
+# Runs on pull_request AND on pushes to master. It used to be pull_request-only,
+# which meant this project's actual deploy path — commit straight to master — was
+# never scanned. The gate was watching the door nobody uses.
 on:
   pull_request:
+  push:
+    branches: [master]
+
+# Least privilege: the scan needs to read the repo, nothing else. Without this the
+# job inherits the repository default, which may be read-write for every scope.
+permissions:
+  contents: read
 
 jobs:
   strix-scan:
@@ -11,8 +21,18 @@ jobs:
         with:
           fetch-depth: 0   # required for diff-scope resolution
 
-      - name: Install Strix
-        run: curl -sSL https://strix.ai/install | bash
+      - name: Install Strix (pinned to a release tag)
+        # Pinned deliberately. This step runs with the LLM secrets below in scope, so
+        # `curl <moving-url> | bash` would let an upstream change execute here without
+        # a reviewable commit in this repo. The tag and the VERSION pin below both
+        # point at v1.6.2 (the release published 2026-09-05), and the installer honours
+        # VERSION for the binary it downloads. Bump both together.
+        env:
+          VERSION: "1.6.2"
+        run: |
+          curl -sSL https://raw.githubusercontent.com/usestrix/strix/v1.6.2/scripts/install.sh -o strix-install.sh
+          bash strix-install.sh
+          rm -f strix-install.sh
 
       - name: Run Security Scan
         env:
