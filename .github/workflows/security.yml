@@ -69,7 +69,12 @@ jobs:
           case "$status" in
             0) echo "scan finished with no validated findings in the analysed scope" ;;
             1) echo "::error title=Strix scan failed::fatal error (missing env, Docker down, bad config)"; exit 1 ;;
-            2) echo "::warning title=Strix found vulnerabilities::see the uploaded artifacts"; echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            # 2 means the scan COMPLETED and validated vulnerabilities. This must fail
+            # the build: a security gate that finds issues and reports success is worse
+            # than no gate, because it manufactures false assurance. (This branch used
+            # to only warn — the first real run found 12 issues including a HIGH and the
+            # job went green.)
+            2) echo "::error title=Strix found vulnerabilities::see the uploaded strix-runs artifact"; exit 2 ;;
             *) echo "::error title=Strix scan ended unexpectedly::exit $status"; exit "$status" ;;
           esac
 
