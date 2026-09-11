@@ -42,21 +42,74 @@ def parse_date(value: str) -> date:
     raise ValueError(f"unparseable date: {value!r}")
 
 
+#: A money cell after its currency prefix and thousands separators are removed.
+#: ASCII digits, optional sign, optional decimals — nothing else. Deliberately
+#: strict, because Decimal() accepts far more than a bank export emits and the
+#: tolerant version of this function produced silently wrong ledgers: stripping
+#: "Rs" before its dot turned 'Rs.100' into '.100' (a 1000x understatement with no
+#: error), and 'NaN'/'Infinity' came through as non-finite values that later raise
+#: InvalidOperation inside every export's quantize(). Non-ASCII digits ('١٢٣') and
+#: Python's underscore literals ('1_000') are refused rather than reinterpreted: a
+#: file containing them is not a statement we understand, and an unknown format
+#: must raise (CONSTRAINTS #2), not be guessed at.
+#: NOTE: named _MONEY_CELL_RE, not _MONEY_RE — a later module-level _MONEY_RE
+#: already exists below for _is_money()'s flattened-bank-statement scan, and
+#: reusing the name silently shadowed this one.
+_MONEY_CELL_RE = re.compile(r"^[+-]?[0-9]+(?:\.[0-9]+)?$")
+
+#: Currency prefix, with or without a dot, case-insensitive: 'Rs.', 'Rs', 'INR', '₹'.
+_CURRENCY_PREFIX = re.compile(r"^(?:INR|Rs\.?|₹)\s*", re.IGNORECASE)
+
+#: Digit bounds. Every export calls Decimal.quantize() to 2 places, which raises
+#: once the value needs more digits than the decimal context's precision (28), so
+#: an absurd amount would surface as a 500 rather than a refusal. ₹99,99,99,99,999
+#: is already far beyond any single settlement line, and real money has at most
+#: paise (2) — 6 is generous for a source that writes fractions oddly.
+_MAX_INT_DIGITS = 13
+_MAX_FRAC_DIGITS = 6
+
+
+def _validate_money(amount: Decimal, source: object) -> Decimal:
+    """Reject money that is not finite, or not a plausible rupee amount.
+
+    The one place non-finite and out-of-range values are stopped, so every entry
+    point (CSV cells, JSON amounts, paise) is covered by the same rule. Without
+    it a hostile or merely odd input reaches the export layer and becomes a 500.
+    Each refusal names the actual problem, because "out of range" on a lossy float
+    sends the caller looking in the wrong place.
+    """
+    if not amount.is_finite():
+        raise ValueError(f"non-finite amount: {source!r}")
+    tup = amount.as_tuple()
+    int_digits = len(tup.digits) + tup.exponent
+    frac_digits = max(0, -tup.exponent)
+    if int_digits > _MAX_INT_DIGITS:
+        raise ValueError(f"amount out of range for a rupee amount: {source!r}")
+    if frac_digits > _MAX_FRAC_DIGITS:
+        # Reached by passing a float: Decimal(191.9) carries the binary expansion
+        # (1.919000000000000056843418861), which is not a price anyone quoted. Pass
+        # a string or a Decimal instead of guessing what the float meant.
+        raise ValueError(
+            f"amount has more than {_MAX_FRAC_DIGITS} decimal places ({source!r}); "
+            "pass an exact value (str or Decimal), not a float"
+        )
+    return amount
+
+
 def parse_amount(value: str) -> Decimal:
-    s = (
-        value.strip()
-        .replace(",", "")
-        .replace("₹", "")
-        .replace("Rs", "")
-        .replace("rs", "")
-        .replace(" ", "")
-    )
-    if s.startswith("(") and s.endswith(")"):
-        s = "-" + s[1:-1]
+    """Parse a money cell into Decimal RUPEES, or raise. Never guesses."""
+    s = (value or "").strip()
+    parenthesised = s.startswith("(") and s.endswith(")")   # accounting negative
+    if parenthesised:
+        s = s[1:-1]
+    s = _CURRENCY_PREFIX.sub("", s).replace(",", "").replace(" ", "")
+    if not _MONEY_CELL_RE.match(s):
+        raise ValueError(f"unparseable amount: {value!r}")
     try:
-        return Decimal(s)
+        amount = Decimal(s)
     except InvalidOperation as exc:
         raise ValueError(f"unparseable amount: {value!r}") from exc
+    return _validate_money(-amount if parenthesised else amount, value)
 
 
 def _txns_from_rows(
@@ -98,8 +151,21 @@ def load_csv(
     Column names are passed explicitly, so this works for any settlement-file
     or bank-statement layout without vendor-specific code. The mapping for a
     given vendor is a small dict, filled from a real sample file, not guessed.
+
+    Refuses a JSON payload by name. Handed `{"items": [...]}`, a CSV reader takes
+    the whole line as ONE header field and finds no data rows, so the caller gets
+    an empty result rather than an error — and an empty reconciliation looks
+    exactly like a clean one. That silent zero is the worst failure this library
+    can produce, so the payload is detected instead of reported as success.
     """
     with open(path, newline="", encoding="utf-8-sig") as fh:
+        if fh.read(64).lstrip()[:1] in ("{", "["):
+            raise ValueError(
+                f"{path} looks like JSON, not CSV. This loader reads comma-separated "
+                "files; use a JSON parser (e.g. parse_razorpay_settlements) for a JSON "
+                "payload, or export the data as CSV."
+            )
+        fh.seek(0)
         return _txns_from_rows(
             csv.DictReader(fh), utr_col, amount_col, date_col, ref_col
         )
@@ -429,8 +495,19 @@ def load_bank_statement_text(path: str | Path, *, narration_after: bool = False)
 
 
 def _paise(value) -> Decimal:
-    """Razorpay returns money in the smallest currency unit (paise). Convert to rupees."""
-    return Decimal(value) / Decimal("100")
+    """Razorpay money: smallest currency unit (paise) -> Decimal RUPEES.
+
+    Validated as well as at the CSV boundary, because a JSON amount can arrive as
+    `1e400` (legal JSON, parses to float('inf')) or as a bare `Infinity` literal.
+    A non-finite Decimal survives all the way into the export layer's quantize(),
+    where it raises InvalidOperation mid-request — so bad input surfaces as a 500
+    instead of the 400 the caller can act on.
+    """
+    try:
+        rupees = Decimal(value) / Decimal("100")
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"unparseable amount: {value!r}") from exc
+    return _validate_money(rupees, value)
 
 
 # Razorpay timestamps are Unix epoch seconds in UTC. Indian bank statements are
@@ -445,17 +522,48 @@ def _epoch_date(value) -> date:
     return datetime.fromtimestamp(int(value), tz=_IST).date()
 
 
+#: The two fields a settlement row cannot be built without. The documented schema
+#: has more (entity, fees, tax, utr) but all of those have sane defaults or are
+#: optional; these two are what the row IS.
+RAZORPAY_SETTLEMENT_REQUIRED = ("id", "amount", "created_at")
+
+
 def parse_razorpay_settlements(data: dict) -> list[Settlement]:
     """Parse a Razorpay 'Fetch All Settlements' response into Settlement rows.
 
     Field names follow the documented API schema (id, entity, amount, fees,
     tax, utr, created_at). amount/fees/tax are integers in paise and are
     converted to Decimal rupees. Non-settlement entities are skipped.
+
+    Validates its envelope and raises ValueError, exactly as the recon parser
+    does — the two used to disagree. This parser read `data.get(...)` and
+    `item.get(...)` unguarded, so a payload that was merely the wrong shape (a
+    top-level list, or `items` as an object) raised AttributeError/KeyError, which
+    the hosted layer correctly refused to treat as user error and turned into a
+    500. A wrong-shaped file is the caller's, not a server fault (D-15).
     """
+    if not isinstance(data, dict):
+        raise ValueError(
+            "razorpay settlements response must be a JSON object with an 'items' list "
+            f"(got {type(data).__name__})"
+        )
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise ValueError(
+            "razorpay settlements response has no 'items' list "
+            f"(got {type(items).__name__})"
+        )
     out: list[Settlement] = []
-    for item in data.get("items", []):
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"settlement entry must be an object (got {type(item).__name__})"
+            )
         if item.get("entity") != "settlement":
             continue
+        missing = [k for k in RAZORPAY_SETTLEMENT_REQUIRED if k not in item]
+        if missing:
+            raise ValueError(f"settlement entry missing required keys: {missing}")
         out.append(
             Settlement(
                 settlement_id=item["id"],
@@ -592,13 +700,20 @@ def _rupees(value) -> Decimal:
     """Money from a JSON payload: a rupee string, or a JSON number.
 
     Never float arithmetic: a JSON number is routed through its decimal string
-    form, and the file loaders ask json for Decimal directly.
+    form, and the file loaders ask json for Decimal directly. Validated like every
+    other money entry point, so a non-finite or absurd value is refused here rather
+    than crashing an export later.
     """
     if isinstance(value, str):
-        return parse_amount(value)
-    if value is None or isinstance(value, bool):
+        amount = parse_amount(value)
+    elif value is None or isinstance(value, bool):
         raise ValueError(f"unparseable amount: {value!r}")
-    return Decimal(str(value))
+    else:
+        try:
+            amount = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise ValueError(f"unparseable amount: {value!r}") from exc
+    return _validate_money(amount, value)
 
 
 def _rupees_or_zero(value) -> Decimal:

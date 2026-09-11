@@ -1,6 +1,9 @@
 """Self-check for the library. Run: python tests/test_matching.py"""
 import contextlib
+import csv
+import io
 import sys
+import time
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -1207,6 +1210,192 @@ def test_juspay_settlement_refuses_an_unknown_status():
             raise AssertionError("an unknown Settlement Status was accepted")
         except ValueError as exc:
             assert "Partially Settled" in str(exc), exc
+
+
+# ---- v2 review remediation: money, shapes, JSON-as-CSV, exports, linearity ----
+
+def test_parse_amount_is_strict_at_the_boundary():
+    # The tolerant version stripped "Rs" before its dot, so 'Rs.100' became '.100' —
+    # a 1000x understatement with no error — and whatever Decimal() accepted came
+    # through, including non-finite values that later crash the exports' quantize().
+    from settleflow import parse_amount
+
+    # must parse, with the RIGHT value
+    assert parse_amount("Rs.100") == Decimal("100"), parse_amount("Rs.100")
+    assert parse_amount("Rs.250") == Decimal("250"), parse_amount("Rs.250")
+    assert parse_amount("Rs.100.00") == Decimal("100.00")
+    assert parse_amount("Rs 100.00") == Decimal("100.00")
+    assert parse_amount("INR 100.00") == Decimal("100.00")
+    assert parse_amount("₹100.00") == Decimal("100.00")
+    assert parse_amount("1,23,456.78") == Decimal("123456.78")
+    assert parse_amount("(100.00)") == Decimal("-100.00")   # accounting negative
+    assert parse_amount("+25.00") == Decimal("25.00")
+    assert parse_amount("  100.00  ") == Decimal("100.00")
+
+    # must refuse rather than reinterpret
+    for bad in ("NaN", "Infinity", "-Infinity", "1_000", "\u0661\u0662\u0663",
+                "1e400", "1E+400", "", "abc", "100.00 Cr"):
+        try:
+            got = parse_amount(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"parse_amount({bad!r}) should have raised, returned {got!r}")
+
+    # an absurd magnitude is refused, because quantize() would raise later and the
+    # user would see a 500 for what is really a bad file
+    try:
+        parse_amount("999999999999999999999999")
+        raise AssertionError("an out-of-range amount was accepted")
+    except ValueError:
+        pass
+
+
+def test_paise_refuses_non_finite_and_absurd():
+    from settleflow.parsers import _paise
+    assert _paise(19100) == Decimal("191")
+    assert _paise("191.9") == Decimal("1.919")          # exact, no float noise
+    assert _paise(-9900.5) == Decimal("-99.005")
+    for bad in (float("inf"), float("-inf"), float("nan"), "Infinity", "NaN", 1e400):
+        try:
+            got = _paise(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"_paise({bad!r}) should have raised, returned {got!r}")
+    # a lossy float is refused with a message that points at the real cause
+    try:
+        _paise(191.9)
+        raise AssertionError("a float amount was accepted")
+    except ValueError as exc:
+        assert "decimal places" in str(exc), exc
+
+
+def test_parse_razorpay_settlements_fails_closed_on_shape():
+    # These shapes used to raise AttributeError/KeyError, which the hosted layer
+    # correctly refused to label "user error" and turned into a 500. A wrong-shaped
+    # file is the caller's, so it must be a ValueError like the recon parser's.
+    from settleflow import parse_razorpay_settlements
+    for payload in ([1, 2, 3],                                # top-level list
+                    {"items": {"a": 1}},                      # items is an object
+                    {"items": [1, 2]},                        # entry is not an object
+                    {"items": [{"entity": "settlement", "amount": 1, "created_at": 1}]},
+                    {"items": [{"entity": "settlement", "id": "x", "created_at": 1}]}):
+        try:
+            parse_razorpay_settlements(payload)
+            raise AssertionError(f"payload accepted: {payload!r}")
+        except ValueError:
+            continue
+    # and the happy path still works
+    rows = parse_razorpay_settlements({"items": [
+        {"entity": "settlement", "id": "s1", "amount": 9900, "created_at": 1756944000}]})
+    assert len(rows) == 1 and rows[0].amount == Decimal("99"), rows
+
+
+def test_load_csv_refuses_a_json_payload():
+    # A JSON payload read as CSV is ONE header field and zero data rows, so the
+    # caller got an empty result instead of an error — and an empty reconciliation
+    # looks exactly like a clean one.
+    from settleflow import load_csv
+    with _temp_text('{"items": [{"entity": "settlement"}]}') as path:
+        try:
+            load_csv(path, "utr", "amount", "date")
+            raise AssertionError("a JSON payload was accepted as CSV")
+        except ValueError as exc:
+            assert "JSON" in str(exc), exc
+    # a real CSV still loads
+    with _temp_text("utr,amount,date\nUTR1,10.00,2025-09-04\n") as path:
+        rows = load_csv(path, "utr", "amount", "date")
+    assert len(rows) == 1 and rows[0].amount == Decimal("10.00"), rows
+
+
+def test_exports_are_consistent_and_defuse_formulas():
+    from settleflow import format_money, export_tally_csv
+    # one formatter for page and CSV: a raw Decimal drops trailing zeros
+    assert format_money(Decimal("100")) == "100.00"
+    assert format_money(Decimal("99.5")) == "99.50"
+
+    evil = '=HYPERLINK("http://evil.example/x","click")'
+    result = match([t("UTRX1", "100.00", 5, evil)], [t("UTRX1", "100.00", 5)])
+    csv_text = export_tally_csv(result)
+    # Assert on the PARSED cell, not a raw substring: csv.writer doubles the inner
+    # quotes, so the literal text never appears verbatim in the file.
+    cells = [row for row in csv.reader(io.StringIO(csv_text))][1:]
+    assert cells and cells[0][1] == "'" + evil, cells
+    assert all(cell != evil for row in cells for cell in row), "an undefused cell survived"
+
+    # a hyphen-leading reference is ordinary data and must NOT be rewritten
+    ok = match([t("UTRX2", "100.00", 5, "-INST-2025-0142")], [t("UTRX2", "100.00", 5)])
+    assert "-INST-2025-0142" in export_tally_csv(ok)
+
+
+def test_cli_refuses_a_json_settlement_file():
+    # What the CLI did before: read it as CSV, find nothing, print "settlements : 0"
+    # and exit 0 — a confident, empty, wrong answer.
+    from settleflow.__main__ import main
+    d = Path(tmp_dir()) / "cli-json"
+    d.mkdir(parents=True, exist_ok=True)
+    sett = _write(d / "set.json", '{"items": [{"entity": "settlement", "id": "s1",'
+                                  ' "amount": 9900, "created_at": 1756944000}]}\n')
+    bank = _write(d / "bank.csv", "UTR,Amount,Date\nUTR1,99.00,2025-09-04\n")
+    outdir = d / "out"
+    rc = main(["reconcile", "--settlements", str(sett), "--vendor",
+               "razorpay_settlement_csv", "--bank", "hdfc", "--statement", str(bank),
+               "--out-dir", str(outdir)])
+    assert rc == 2, f"expected a refusal (exit 2), got {rc}"
+    assert not (outdir / "tally.csv").exists(), "a refused run still wrote a workpaper"
+
+
+def test_cli_csv_output_is_well_formed_and_aligned():
+    # Two Windows/CSV defects in one place: a narration containing a comma used to
+    # shift every later column, and text-mode writes doubled the csv module's CRLF.
+    from settleflow.__main__ import main
+    d = Path(tmp_dir()) / "cli-csv"
+    d.mkdir(parents=True, exist_ok=True)
+    sett = _write(d / "set.csv", "utr,amount,created_at,id\n")     # nothing to match
+    bank = _write(d / "bank.csv",
+                  "Date,Withdrawal Amt.,Deposit Amt.,Chq./Ref.No.,Narration\n"
+                  '01/09/2025,,10.00,REF9,"NEFT CR ACME, PVT LTD"\n')
+    outdir = d / "out"
+    rc = main(["reconcile", "--settlements", str(sett), "--vendor",
+               "razorpay_settlement_csv", "--bank", "hdfc", "--statement", str(bank),
+               "--out-dir", str(outdir)])
+    assert rc == 0, rc
+
+    raw = (outdir / "exceptions.csv").read_bytes()
+    assert b"\r\r\n" not in raw, f"double carriage return in exceptions.csv: {raw!r}"
+    rows = list(csv.reader(io.StringIO(raw.decode("utf-8"))))
+    widths = {len(r) for r in rows}
+    assert widths == {5}, f"exceptions.csv rows have mismatched widths: {rows}"
+
+    tally = (outdir / "tally.csv").read_bytes()
+    assert b"\r\r\n" not in tally, f"double carriage return in tally.csv: {tally!r}"
+
+
+def test_match_is_linear_when_many_rows_share_one_utr():
+    # One RRN paying out a whole batch is a real shape, and the old implementation
+    # rescanned the candidate list per settlement, so it went quadratic: measured
+    # 0.011s / 0.066s / 0.161s / 0.655s at 1k / 2k / 4k / 8k. This bound is a
+    # regression detector, so it is deliberately loose — 40k under the old code
+    # extrapolates to ~16s, while the linear version does it in well under a second
+    # even on a slow CI runner.
+    n = 40000
+    settlements = [t("SAMEUTR", "1.00", 5) for _ in range(n)]
+    bank = [t("SAMEUTR", "1.00", 5) for _ in range(n)]
+
+    started = time.monotonic()
+    result = match(settlements, bank)
+    elapsed = time.monotonic() - started
+
+    assert len(result.matched) == n, len(result.matched)
+    assert not result.settlement_only and not result.bank_only
+    assert elapsed < 5.0, (
+        f"match() took {elapsed:.1f}s for {n} rows sharing one UTR — the quadratic "
+        "rescan is back (it should be linear)"
+    )
+
+    # the same-amount preference still holds when amounts differ under one UTR
+    mixed = match([t("M", "10.00", 5), t("M", "20.00", 5)],
+                  [t("M", "20.00", 5), t("M", "10.00", 5)])
+    assert all(m.status is MatchStatus.EXACT for m in mixed.matched), mixed.matched
 
 
 if __name__ == "__main__":

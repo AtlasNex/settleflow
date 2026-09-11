@@ -32,14 +32,34 @@ def _write(rows: list[list], header: list[str]) -> str:
     return buf.getvalue()
 
 
-def _money(value: Decimal) -> str:
-    """Format a rupee amount as a consistent 2-decimal string for exports.
+def format_money(value: Decimal) -> str:
+    """Format a rupee amount as a consistent 2-decimal string.
 
-    Without this, whole-number amounts print as '1000' while fractional ones
-    print as '1000.00', which is inconsistent in accountant-facing CSVs
-    (Tally / GST / TDS). Quantize to paise so every money cell is 'x.xx'.
+    One function for both the exports and the results page, because they disagreed:
+    the same amount printed as '100' in the page's summary table and '100.00' in the
+    CSV that page links to. Quantize to paise so every money cell is 'x.xx'.
     """
     return str(Decimal(value).quantize(Decimal("0.01")))
+
+
+#: Kept as the internal name used throughout this module.
+_money = format_money
+
+
+#: A cell a spreadsheet would EVALUATE rather than display. Excel and Google Sheets
+#: treat a leading = + @ (or tab/CR) as the start of a formula even when the field
+#: is CSV-quoted, so a narration like "=HYPERLINK(""http://evil/x"",""click"")"
+#: becomes a live formula the moment the accountant opens the workpaper. Prefixing
+#: a single quote is the standard defusal: the text still reads correctly and stops
+#: being executable. `-` is deliberately NOT included — a reference or narration
+#: beginning with a hyphen is legal data, and quoting it would corrupt real values.
+_FORMULA_PREFIXES = ("=", "+", "@", "\t", "\r")
+
+
+def _cell(value: str | None) -> str:
+    """Free text for a CSV cell, defused if it would be read as a formula."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_FORMULA_PREFIXES) else text
 
 
 def export_tally_csv(result: ReconResult) -> str:
@@ -53,15 +73,15 @@ def export_tally_csv(result: ReconResult) -> str:
     for m in result.matched:
         rows.append([
             m.settlement.txn_date.isoformat(),
-            m.settlement.ref or m.settlement.utr or "",
+            _cell(m.settlement.ref or m.settlement.utr),
             _money(m.settlement.amount),
-            m.bank.utr or "",
+            _cell(m.bank.utr),
             "MATCHED",
         ])
     for t in result.settlement_only:
         rows.append([
             t.txn_date.isoformat(),
-            t.ref or t.utr or "",
+            _cell(t.ref or t.utr),
             _money(t.amount),
             "",
             "PENDING_BANK",
@@ -69,9 +89,9 @@ def export_tally_csv(result: ReconResult) -> str:
     for t in result.bank_only:
         rows.append([
             t.txn_date.isoformat(),
-            t.ref or t.utr or "",
+            _cell(t.ref or t.utr),
             _money(t.amount),
-            t.utr or "",
+            _cell(t.utr),
             "UNEXPECTED_CREDIT",
         ])
     return _write(rows, ["date", "reference", "amount_inr", "bank_utr", "status"])
@@ -86,8 +106,8 @@ def export_gst_worksheet(lines: list[ReconLine]) -> str:
     rows = []
     for b in group_batches(lines):
         rows.append([
-            b.settlement_id,
-            b.utr or "",
+            _cell(b.settlement_id),
+            _cell(b.utr),
             _money(b.gross),
             _money(b.fees),
             _money(b.taxes),
@@ -134,13 +154,13 @@ def export_tds_1035(
         tds = Decimal("0") if threshold_exempt else (line.amount * TDS_1035_RATE).quantize(Decimal("0.01"))
         rows.append([
             line.created_at.isoformat(),
-            line.entity_id,
-            line.order_id or "",
+            _cell(line.entity_id),
+            _cell(line.order_id),
             _money(line.amount),
             TDS_1035_CODE if not threshold_exempt else "EXEMPT_BELOW_5L",
             _money(tds),
             _money(line.amount - tds),
-            seller_pan or "",
+            _cell(seller_pan),
         ])
     return _write(
         rows,

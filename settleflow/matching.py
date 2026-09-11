@@ -1,7 +1,7 @@
 """Deterministic RRN/UTR matching engine."""
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import deque
 from decimal import Decimal
 
 from .models import (
@@ -30,32 +30,51 @@ def match(settlements: list[Txn], bank: list[Txn]) -> ReconResult:
 
     Bank lines are tracked by list index (not object identity) so two rows
     with identical values are still treated as distinct.
+
+    Consumption is linear: each bank line sits in at most one per-key queue and one
+    per-amount queue, and is popped once. An earlier version rescanned the candidate
+    list for every settlement, which went quadratic when many rows share one UTR —
+    a real shape (one RRN paying out a whole batch) rather than a synthetic one, and
+    it fits comfortably inside the hosted upload cap. Measured before/after at
+    n rows sharing a single UTR: 1k=0.011s, 2k=0.066s, 4k=0.161s, 8k=0.655s
+    (~4x per doubling) versus linear here.
     """
     result = ReconResult()
 
-    bank_by_utr: dict[str, list[tuple[int, Txn]]] = defaultdict(list)
+    # Per-UTR state: `any` holds every index with this key, `by_amount` indexes the
+    # same rows by amount so the same-amount preference is a popleft, not a rescan.
+    by_utr: dict[str, dict] = {}
     for i, b in enumerate(bank):
         if b.key:
-            bank_by_utr[b.key].append((i, b))
+            slot = by_utr.setdefault(b.key, {"any": deque(), "by_amount": {}})
+            slot["any"].append(i)
+            slot["by_amount"].setdefault(b.amount, deque()).append(i)
 
     consumed: set[int] = set()
 
-    def take(candidates: list[tuple[int, Txn]], amount: Decimal) -> Txn | None:
-        # Prefer a same-amount line, else the first free line.
-        for i, c in candidates:
-            if i not in consumed and c.amount == amount:
-                consumed.add(i)
-                return c
-        for i, c in candidates:
+    def pop_unconsumed(queue: deque) -> int | None:
+        """Pop the next index from `queue` that has not already been consumed."""
+        while queue:
+            i = queue.popleft()
             if i not in consumed:
                 consumed.add(i)
-                return c
+                return i
         return None
+
+    def take(key: str, amount: Decimal) -> Txn | None:
+        slot = by_utr.get(key)
+        if not slot:
+            return None
+        bucket = slot["by_amount"].get(amount)
+        idx = pop_unconsumed(bucket) if bucket is not None else None
+        if idx is None:
+            idx = pop_unconsumed(slot["any"])
+        return bank[idx] if idx is not None else None
 
     pending: list[Txn] = []
     for s in settlements:
         if s.key:
-            b = take(bank_by_utr.get(s.key, []), s.amount)
+            b = take(s.key, s.amount)
             if b is not None:
                 status = (
                     MatchStatus.EXACT
@@ -67,15 +86,16 @@ def match(settlements: list[Txn], bank: list[Txn]) -> ReconResult:
         pending.append(s)
 
     # Amount + date fallback among the still-free bank lines.
-    by_amount_date: dict[tuple[Decimal, object], list[tuple[int, Txn]]] = defaultdict(list)
+    by_amount_date: dict[tuple[Decimal, object], deque] = {}
     for i, b in enumerate(bank):
         if i not in consumed:
-            by_amount_date[(b.amount, b.txn_date)].append((i, b))
+            by_amount_date.setdefault((b.amount, b.txn_date), deque()).append(i)
 
     for s in pending:
-        b = take(by_amount_date.get((s.amount, s.txn_date), []), s.amount)
-        if b is not None:
-            result.matched.append(Match(s, b, MatchStatus.AMOUNT_DATE))
+        bucket = by_amount_date.get((s.amount, s.txn_date))
+        idx = pop_unconsumed(bucket) if bucket is not None else None
+        if idx is not None:
+            result.matched.append(Match(s, bank[idx], MatchStatus.AMOUNT_DATE))
         else:
             result.settlement_only.append(s)
 
@@ -139,20 +159,29 @@ def match_orders(lines: list[ReconLine], orders: list[Txn]) -> OrderReconResult:
     adjustments = [l for l in lines if l.type == "adjustment"]
     result.adjustments.extend(adjustments)
 
-    orders_by_ref: dict[str, list[int]] = defaultdict(list)
+    orders_by_ref: dict[str, deque] = {}
     for i, o in enumerate(orders):
         if o.ref:
-            orders_by_ref[normalize_ref(o.ref)].append(i)
+            orders_by_ref.setdefault(normalize_ref(o.ref), deque()).append(i)
     consumed: set[int] = set()
+
+    def pop_unconsumed(queue: deque) -> int | None:
+        """Pop the next index from `queue` that has not already been consumed."""
+        while queue:
+            i = queue.popleft()
+            if i not in consumed:
+                consumed.add(i)
+                return i
+        return None
 
     def take_order(ref: str | None, amount: Decimal) -> tuple[Txn, bool] | None:
         if not ref:
             return None
-        for i in orders_by_ref.get(normalize_ref(ref), []):
-            if i not in consumed:
-                consumed.add(i)
-                return orders[i], orders[i].amount == amount
-        return None
+        bucket = orders_by_ref.get(normalize_ref(ref))
+        idx = pop_unconsumed(bucket) if bucket is not None else None
+        if idx is None:
+            return None
+        return orders[idx], orders[idx].amount == amount
 
     pending: list[ReconLine] = []
     for line in payment_lines:
@@ -166,19 +195,15 @@ def match_orders(lines: list[ReconLine], orders: list[Txn]) -> OrderReconResult:
         pending.append(line)
 
     # Amount + date fallback among the still-free orders.
-    by_amount_date: dict[tuple[Decimal, object], list[int]] = defaultdict(list)
+    by_amount_date: dict[tuple[Decimal, object], deque] = {}
     for i, o in enumerate(orders):
         if i not in consumed:
-            by_amount_date[(o.amount, o.txn_date)].append(i)
+            by_amount_date.setdefault((o.amount, o.txn_date), deque()).append(i)
     for line in pending:
-        hit_i = None
-        for i in by_amount_date.get((line.amount, line.created_at), []):
-            if i not in consumed:
-                hit_i = i
-                consumed.add(i)
-                break
-        if hit_i is not None:
-            result.matched.append(OrderMatch(line, orders[hit_i], MatchStatus.AMOUNT_DATE))
+        bucket = by_amount_date.get((line.amount, line.created_at))
+        idx = pop_unconsumed(bucket) if bucket is not None else None
+        if idx is not None:
+            result.matched.append(OrderMatch(line, orders[idx], MatchStatus.AMOUNT_DATE))
         else:
             result.unmatched_lines.append(line)
 

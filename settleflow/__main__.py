@@ -12,12 +12,14 @@ exceptions, `exceptions.csv`, then prints a one-line summary.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import sys
 from datetime import date
 from pathlib import Path
 
 from .exceptions import classify
-from .exports import export_tally_csv
+from .exports import export_tally_csv, format_money
 from .matching import match
 from .pdf import parse_sbi_pdf
 from .schemas import load_bank_statement, load_settlement_csv
@@ -57,27 +59,42 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
 
-    settlements = load_settlement_csv(args.settlements, args.vendor)
-    bank = _load_statement(args.statement, args.bank, ocr=args.ocr)
-    result = match(settlements, bank)
-
-    as_of = date.fromisoformat(args.as_of) if args.as_of else None
-    exceptions = classify(result, as_of=as_of)
+    try:
+        settlements = load_settlement_csv(args.settlements, args.vendor)
+        bank = _load_statement(args.statement, args.bank, ocr=args.ocr)
+        result = match(settlements, bank)
+        as_of = date.fromisoformat(args.as_of) if args.as_of else None
+        exceptions = classify(result, as_of=as_of)
+    except ValueError as exc:
+        # A bad input file is the caller's, not a crash. Without this the loader's
+        # refusal surfaced as a traceback, which is non-zero but tells the user
+        # nothing; and the failure it replaces was worse — a JSON settlement file
+        # used to read as an empty CSV and be reported as a clean, successful run.
+        print(f"settleflow: {exc}", file=sys.stderr)
+        return 2
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     tally = export_tally_csv(result)
-    (out / "tally.csv").write_text(tally, encoding="utf-8")
+    # newline="" so the csv module's own CRLF line endings are written verbatim.
+    # Without it, text mode translates the '\r\n' again on Windows and the file
+    # contains CR-CRLF bytes — malformed for anything that reads it strictly.
+    (out / "tally.csv").write_text(tally, encoding="utf-8", newline="")
 
     wrote = [str(out / "tally.csv")]
     if exceptions:
-        rows = "\n".join(
-            f"{e.category},{e.amount},{e.utr or ''},{e.ref or ''},{e.detail}"
-            for e in exceptions
-        )
+        # csv.writer, not string joins: a narration or reference containing a comma
+        # (e.g. "NEFT CR ACME, PVT LTD") used to shift every column after it, so the
+        # whole row was misaligned in the file the accountant opens.
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["category", "amount", "utr", "ref", "detail"])
+        for e in exceptions:
+            writer.writerow([e.category, format_money(e.amount), e.utr or "",
+                             e.ref or "", e.detail])
         (out / "exceptions.csv").write_text(
-            "category,amount,utr,ref,detail\n" + rows + "\n", encoding="utf-8",
+            buf.getvalue(), encoding="utf-8", newline="",
         )
         wrote.append(str(out / "exceptions.csv"))
 
