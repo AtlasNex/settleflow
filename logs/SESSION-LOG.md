@@ -603,3 +603,41 @@ Sanjay's call; nothing was deployed.
   (the 12 Strix findings, `todo`); ATL-218 `blocked` (owner-gated); ATL-230 `todo` (rename).
 - Skill `ci-security-scanning-with-strix` corrected: `LLM_API_BASE`, the three failures that
   masquerade as auth errors, the thinking-mode incompatibility, and the gate-killers.
+
+### Session 16 (closeout addendum) — the Strix runs, and the credits wall
+
+Recorded after the main entry, because these outcomes arrived late and a cold session must not have
+to rediscover them.
+
+**Three security runs, three different lessons.**
+
+| Run | On | Outcome | Lesson |
+|---|---|---|---|
+| `34595883781` | `b14c87a` | completed, 49 min, **12 findings** (1 high, 5 medium) — but the job reported **success** | the exit-2 gate was broken and fabricated assurance; fixed in `264c254` |
+| `34600087325` | `264c254` | failed after 27 min, `400 reasoning_content ... must be passed back` | deepseek's thinking mode is structurally incompatible with Strix's OpenAI client; swapped to GLM-5.3 in `acc5275` |
+| `34604701290` | `acc5275` | failed after 5 min, `400 "You have insufficient credits"` | **a `quick` scan cost 85.5M tokens and drained the CommandCode account** |
+
+**The credits wall is the current blocker on the security gate.** Run 1 consumed 557 requests /
+84.75M input (83.45M cached) / 779k output = **85,532,346 tokens**. That is a real cost, and a
+`quick` scan is not cheap — worth knowing before anyone re-runs it. Until the account is funded (or
+the scan is pointed at another funded provider), the gate cannot run at all.
+
+**What is still unproven:** the exit-2 path. `264c254` made findings fail the build, but no run has
+*completed with findings* since, so that branch has never actually fired. Runs 2 and 3 never reached
+it. The first run to complete with findings is the proof, and it should be treated as an explicit
+acceptance test rather than an assumption.
+
+**The gate's failure behaviour is correct, and worth noting.** All three runs failed loudly and
+distinguishably: a connection failure says the scan did not run (rather than reading as "no
+vulnerabilities"), and the completion gate reports `run.json` status `failed` and says the run proves
+nothing either way. That distinction was worth building — a red job for a billing reason is
+otherwise indistinguishable from a red job for a finding.
+
+**Durable artifacts.** All 12 findings, the report, SARIF, `run.json` and the 12 per-finding write-ups
+are copied to `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/` (19 files, 2.6 MB),
+because the CI artifact expires in 30 days and these are an abuse write-up against a public repo.
+Filed as ATL-242; the credits blocker was added to the owner-gated list (ATL-218).
+
+**State at final close.** Repo clean at the closeout commit, pushed, CI green apart from the credits
+blocker. `hermes verify --skip-start` → `ok: true`, **all 74 checks passed**, port 8000 clear before
+and after. Live service untouched: **v0.7.3, 165 runs**. Nothing deployed.

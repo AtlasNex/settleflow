@@ -77,10 +77,12 @@ happened — it is the highest-information five minutes available on this projec
 - Repo clean at **`acc5275`**, pushed. **`hermes verify --skip-start` → `ok: true`**, bootstrap exit 0,
   test exit 0, **all 74 checks passed**, port 8000 clear before and after.
 - Zero-dependency core verified (24 modules, all stdlib). Canary 5/5 on the live service.
-- CI green; the **Security Scan** workflow runs on `push: master` too and now **fails on exit 2**.
-- A GLM-5.3 Strix re-run (`34604701290`) was in flight at close — **check it first**; it is the first
-  real test of the exit-2 gate that `264c254` fixed.
-- Nothing was deployed. No background processes left by this session except that CI run.
+- CI green, EXCEPT: **the Security Scan currently fails because CommandCode is out of credits.**
+  `quick` is not cheap — one scan cost **85.5M tokens** (557 requests, 83.5M cached input, 779k
+  output) and exhausted the account. The gate behaves correctly (it fails loudly that the scan did
+  not run), but **the exit-2 path — fail-on-findings — is still unproven**, because no run has
+  completed *with* findings since `264c254` fixed it. The first run to do so is the proof.
+- Nothing was deployed. No background processes left by this session.
 
 ### What shipped this session (8 commits)
 
@@ -125,6 +127,10 @@ happened — it is the highest-information five minutes available on this projec
 13. **Strix model contract:** `LLM_API_BASE` (not `OPENAI_BASE_URL`) for a gateway; never a
     thinking-mode model (reasoning_content round-trip 400s); a 403 `error code 1010` is Cloudflare
     bot-blocking a bare client, not an auth failure (D-39).
+14. **A Strix `quick` scan cost 85.5M tokens and drained the CommandCode account.** Budget for it, and
+    treat "insufficient credits" as an owner-gated blocker, not a code failure — the run fails with
+    `run.json` status `failed` and `Fail unless the scan completed` fires correctly, so it reads like
+    a config bug when it is a billing one.
 
 ---
 
@@ -146,17 +152,21 @@ happened — it is the highest-information five minutes available on this projec
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-git log --oneline -3 && git status --short          # expect clean at acc5275+
+git log --oneline -3 && git status --short          # expect clean at d7288ba+ (or later)
 python tests/test_matching.py                        # expect: all 74 checks passed
 curl -s https://settleflow.atlasnex.com/health       # expect runs >= 165, version 0.7.3
-gh run list --workflow=security.yml --limit 3        # did 34604701290 finish? any findings?
+gh run list --workflow=security.yml --limit 3        # known: failing on CommandCode credits, not code
 
 # then verify state the recorded way (never a full verify):
 hermes verify --skip-start --json
 
-# check the board, then ask Sanjay the only open question that blocks progress:
+# check the board, then ask Sanjay the questions that actually block progress:
 multica issue get ATL-242 --output json | head -40
+multica issue get ATL-218 --output json | head -40
 ```
 
-**First question to Sanjay:** *deploy now, or hold?* Everything else is queued behind that answer,
-and the fixes protect nothing until `bash scripts/deploy.sh` runs.
+**Ask Sanjay two things first:**
+1. *Deploy now, or hold?* Everything else is queued behind that answer, and the fixes protect nothing
+   until `bash scripts/deploy.sh` runs.
+2. *Fund CommandCode (or point Strix at another funded provider)?* The security gate cannot run until
+   that is resolved, and a `quick` scan costs ~85M tokens.

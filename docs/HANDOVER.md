@@ -37,10 +37,17 @@ live right now — an unauthenticated caller can hold the single-worker instance
 indefinitely and grow the database unbounded. If no, the finding is not exploitable as written.
 A live probe settles it; nothing local can.
 
-**Strix is the new verification gate.** It found 12 issues (1 high, 5 medium) that our own
-74-check self-check and the manual review both missed — including a latent `NameError` in a shipped
-SBI parser. Treat a green security run as meaningful only after reading the artifacts, and note the
-artifact expires in 30 days (a durable copy lives outside the repo).
+**Strix is the new verification gate, but it is currently OUT OF CREDITS.** It found 12 issues
+(1 high, 5 medium) that our own 74-check self-check and the manual review both missed — including a
+latent `NameError` in a shipped SBI parser. But a single `quick` scan consumed **85.5M tokens**
+(557 requests; 84.8M input, 83.5M of it cached) and exhausted the CommandCode account: the next run
+died in 5 minutes with `400 "You have insufficient credits"`. **Topping up CommandCode, or moving the
+scan to another funded provider, is now an owner-gated prerequisite for the security gate.** Cost the
+scan accordingly before running it again — `quick` is not cheap.
+
+Treat a green security run as meaningful only after reading the artifacts (a run reported success
+over those 12 findings before the gate was fixed), and note the artifact expires in 30 days — a
+durable copy lives outside the repo.
 
 ### Session 16 — the end-to-end review, every finding fixed, and Strix as a second opinion
 
