@@ -21,16 +21,27 @@
   </p>
 
   <form action="/reconcile" method="post" enctype="multipart/form-data">
-    <label for="settlement_file">Settlement file (Razorpay JSON)
-      <input type="file" id="settlement_file" name="settlement_file" accept=".json,application/json" required>
+    <label for="settlement_file">Settlement file
+      <input type="file" id="settlement_file" name="settlement_file" accept=".json,.csv,.txt,.tsv" required>
     </label>
 
     <label for="settlement_kind">Settlement kind
       <select id="settlement_kind" name="settlement_kind">
         <option value="razorpay_settlements">Razorpay — Fetch All Settlements (batch level)</option>
         <option value="razorpay_recon">Razorpay — Settlement Recon (line-item level, unlocks GST + TDS)</option>
+        <option value="razorpay_settlement_csv">Razorpay — settlements CSV export (batch level)</option>
+        <option value="phonepe_settlement_csv">PhonePe — settlement report CSV</option>
+        <option value="juspay_settlement_csv">Juspay — settlement file CSV</option>
+        <option value="cashfree_settlement_csv">Cashfree — Settlement Recon report CSV</option>
+        <option value="cashfree_recon_csv">Cashfree — Settlement Recon, event section (line-item level)</option>
+        <option value="payu_settlement_range">PayU — /settlement/range API JSON (batch level)</option>
+        <option value="payu_transaction_details">PayU — /settlement/transactionDetails API JSON (line-item level)</option>
       </select>
     </label>
+    <p class="muted" style="margin:.5rem 0 0">
+      Pick the kind that matches your export. A line-item kind also produces the GST and
+      TDS workpapers; a batch kind gives the Tally CSV.
+    </p>
 
     <label for="bank_file">Bank statement CSV
       <input type="file" id="bank_file" name="bank_file" accept=".csv,.txt,.tsv" required>

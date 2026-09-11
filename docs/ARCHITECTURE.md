@@ -13,18 +13,23 @@ settleflow/
 │   │                       #   ReconLine, BatchRecon, OrderMatch, OrderReconResult
 │   ├── matching.py         # match(), match_settlements(), group_batches(), match_orders()
 │   ├── parsers.py          # load_csv(), parse_razorpay_settlements(),
-│   │                       #   parse_razorpay_recon(), load_recon_csv(), parse_date/amount
-│   ├── exports.py          # export_tally_csv(), export_gst_worksheet(), export_tds_1035()
+│   │                       #   parse_razorpay_recon(), parse_payu_*(), load_recon_csv(),
+│   │                       #   parse_date/amount, split_cashfree_recon_report()
+│   ├── exports.py          # export_tally_csv(), export_gst_worksheet(),
+│   │                       #   export_tds_1035(), format_money()
 │   ├── exceptions.py       # classify(), build_llm_prompt(), Exception
 │   ├── pdf.py              # optional [pdf] extra (pymupdf): extract_pdf_text(),
 │   │                       #   parse_sbi_statement() -> parse_sbi_pdf() (YONO/netbanking/credit-card)
+│   ├── ocr.py              # optional [ocr] extra (tesseract): parse_sbi_scanned_pdf()
+│   ├── __main__.py         # the CLI: python -m settleflow reconcile ...
 │   └── schemas.py          # ColumnMap, BankColumnMap, ReconColumnMap, *_MAPS, load_* helpers
 ├── saas/
-│   ├── app.py              # FastAPI: /reconcile, /runs, /export/*, /health
-│   ├── templates/          # index.html, runs.html (Jinja2)
+│   ├── app.py              # FastAPI: /reconcile, /r/<token>, /r/<token>/export/*, /health
+│   ├── helpers.py          # stdlib-only helpers (decoding, column guess, rate-limit identity)
+│   ├── templates/          # index.html, results.html, page.html, error.html (Jinja2)
 │   └── requirements.txt    # fastapi, uvicorn, jinja2, python-multipart
 └── tests/
-    └── test_matching.py    # assert-based self-check (18 checks)
+    └── test_matching.py    # assert-based self-check
 ```
 
 `__init__.py` is the only public boundary. Everything a user imports comes from it. The

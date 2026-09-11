@@ -10,6 +10,7 @@ Nothing here talks to FastAPI, the database, or the network.
 from __future__ import annotations
 
 import html as _html
+import ipaddress
 import re
 
 # ---------------------------------------------------------------------------
@@ -39,6 +40,102 @@ def decode_text(raw: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return raw.decode("latin-1", errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# Request identity and size
+# ---------------------------------------------------------------------------
+
+#: The header whose value is the client's real address. Cloudflare's tunnel sets it
+#: at the edge and the origin is reachable only through that tunnel, so it cannot be
+#: forged by a caller.
+TRUSTED_CLIENT_IP_HEADER = "cf-connecting-ip"
+
+#: The bucket for a request that carries no trustworthy identity. One shared bucket,
+#: not one per request: the alternative is an attacker minting a new bucket with
+#: every request, which is the bug this replaced.
+UNIDENTIFIED_CLIENT = "unidentified"
+
+
+def _header(headers, name: str) -> str | None:
+    """Case-insensitive header read that works for a dict or a Starlette Headers."""
+    try:
+        value = headers.get(name)
+    except AttributeError:
+        value = None
+    if value is not None:
+        return value
+    lowered = name.lower()
+    items = headers.items() if hasattr(headers, "items") else ()
+    for key, value in items:
+        if key.lower() == lowered:
+            return value
+    return None
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def pick_client_ip(headers, trusted_header: str = TRUSTED_CLIENT_IP_HEADER) -> str:
+    """The identity to rate-limit on. Never trusts caller-controlled input.
+
+    The rule is deliberately narrow, because two seemingly-reasonable sources are
+    both caller-controlled in practice:
+
+    * `X-Forwarded-For` is written by the caller — trusting its first hop let 70
+      requests claiming 70 addresses each open a fresh bucket (verified: 70
+      accepted, 0 rejected), so the per-hour limit simply vanished.
+    * the socket peer is not safe either. Uvicorn rewrites `scope["client"]` from
+      X-Forwarded-For when the connection arrives from a trusted proxy address, and
+      the Cloudflare tunnel connects from loopback — so an XFF header still changed
+      the bucket (verified: 10 requests with rotating XFF after the bucket was
+      already exhausted were all accepted).
+
+    So: the trusted header is the ONLY per-client identity, and it must parse as an
+    address so a junk value cannot mint unlimited buckets. With no trusted header
+    the request has no trustworthy identity and every such request shares ONE bucket
+    — conservative and fail-safe, and the correct behaviour for an origin whose only
+    legitimate ingress is the tunnel that sets that header.
+    """
+    trusted = _header(headers, trusted_header)
+    if trusted:
+        candidate = trusted.split(",")[0].strip()
+        if candidate and _is_ip(candidate):
+            return candidate
+    return UNIDENTIFIED_CLIENT
+
+
+def max_request_bytes(max_upload_bytes: int) -> int:
+    """Largest whole request body the service will read.
+
+    `MAX_UPLOAD_BYTES` caps the two FILES the app parses, but not the request: the
+    multipart parser bounds each form FIELD at 1MB while file parts spool with no
+    size check, so extra parts rode through untouched — a 210MB request carrying one
+    unnamed part was accepted. This is the ceiling for everything, with slack for
+    multipart framing and the form fields.
+    """
+    return max_upload_bytes * 2 + 64 * 1024
+
+
+def request_too_large(content_length, limit: int) -> bool:
+    """Whether a DECLARED body size exceeds the limit.
+
+    A missing or unparseable Content-Length is not "large": a chunked request
+    declares nothing, and refusing on a header we cannot read would reject
+    legitimate uploads. The streaming guard covers that case instead.
+    """
+    if content_length is None:
+        return False
+    try:
+        declared = int(content_length)
+    except (TypeError, ValueError):
+        return False
+    return declared > limit
 
 
 # ---------------------------------------------------------------------------

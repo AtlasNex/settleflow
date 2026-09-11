@@ -100,7 +100,11 @@ python tests/test_matching.py    # exit 0 = all green
 - Two-pass matching: exact normalized-UTR → amount+date fallback → explicit unmatched.
 - Order/line-item level reconciliation from the Razorpay recon schema (24 params),
   with per-batch netting.
-- Settlement parsers: Razorpay settlement CSV + Razorpay recon CSV.
+- Settlement parsers: Razorpay settlements CSV, Razorpay recon CSV, PayU's two
+  settlement APIs (`/settlement/range`, `/settlement/transactionDetails`), PhonePe
+  settlement report, Juspay settlement file, and Cashfree's two-section Settlement
+  Recon report. Every map traces to a verified header or documented payload in
+  `docs/SCHEMAS.md`; a format with no verified source is refused, not guessed.
 - Bank statement CSVs: HDFC, SBI, ICICI, Axis, Kotak (three variants incl. Dr/Cr),
   PNB, DBS. SBI PDFs (YONO/netbanking/credit-card) + scanned-PDF OCR via extras.
 - Exports: Tally CSV, GST worksheet, TDS code-1035 (ex-194O) worksheet.
@@ -108,10 +112,11 @@ python tests/test_matching.py    # exit 0 = all green
 
 **Not built — don't pretend otherwise:**
 
-- Only **Razorpay** as a gateway. PayU / Paytm / PhonePe settlements: not supported
-  (a redacted sample file is the fastest way to change this).
-- PDF statement parsing exists **only for SBI layouts** with public evidence; other
+- Bank-statement PDFs exist **only for SBI layouts** with public evidence; other
   banks' PDFs are CSV-only.
+- IDFC bank statements: no real public sample exists, so the map stays empty rather
+  than guessed. Cashfree's plain (non-recon) settlements export is the same story —
+  use its documented JSON API.
 - The amount+date fallback can mis-pair when two bank lines share one (amount, date);
   UTR-based disambiguation is open work (`docs/CONSTRAINTS.md`).
 - Pre-1.0: no API-stability promise, no PyPI release, no SLA, no upgrade tooling.

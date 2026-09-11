@@ -1,9 +1,27 @@
 # Rollback
 
-Know your way out before you need it. This project is a pure git repository (no
-database, no deploy) until Phase 4, so rollback is git.
+Know your way out before you need it.
 
-## Baseline
+**This project is deployed and has state, so rollback is NOT just git.** The hosted
+service runs on the VPS from `/opt/settleflow` under systemd, and it keeps a SQLite
+database (`saas/settleflow.db`) holding every run and captured lead. A `git revert`
+rolls back *code*; it does nothing to the server's files, the unit, or the data.
+
+For a bad deploy, use the script — it restores the previous release, restarts, health
+-checks, and canaries, and it backs up what is live first so the rollback is itself
+reversible:
+
+```bash
+bash scripts/rollback.sh --list      # available backups
+bash scripts/rollback.sh latest      # restore + restart + verify
+```
+
+A backup is **code only**: the deploy and rollback tarballs deliberately exclude
+`*.db` and `.deploy.env`. Restoring an old database over the live one would destroy
+runs created since — the deploy script also asserts the live run count never goes
+downwards, for the same reason.
+
+## Baseline (git history)
 
 - The codebase's commits are chronological and linear. Do not rewrite them.
 - Reference commits (chronological): `ccf753b` baseline, `aad10fc` Razorpay parser,

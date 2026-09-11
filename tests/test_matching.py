@@ -1398,6 +1398,49 @@ def test_match_is_linear_when_many_rows_share_one_utr():
     assert all(m.status is MatchStatus.EXACT for m in mixed.matched), mixed.matched
 
 
+def test_pick_client_ip_trusts_only_the_cloudflare_header():
+    # The hosted rate limit keyed on the first X-Forwarded-For hop, which the CALLER
+    # writes, so 70 requests claiming 70 addresses each got a fresh bucket (70
+    # accepted, 0 rejected). The socket peer is not usable either: uvicorn rewrites
+    # scope["client"] from X-Forwarded-For when the connection arrives from a trusted
+    # proxy, and the tunnel arrives from loopback — so the peer is just as spoofable.
+    # Only the Cloudflare header counts; anything else shares ONE bucket, so no
+    # caller can mint a new bucket per request.
+    from helpers import UNIDENTIFIED_CLIENT, pick_client_ip
+
+    # a caller-supplied X-Forwarded-For is ignored entirely
+    assert pick_client_ip({"x-forwarded-for": "1.2.3.4"}) == UNIDENTIFIED_CLIENT
+    assert pick_client_ip({"x-forwarded-for": "1.2.3.4", "cf-connecting-ip": "9.9.9.9"}) == "9.9.9.9"
+    # the trusted header wins when present and valid, case-insensitively
+    assert pick_client_ip(
+        {"cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "1.2.3.4"}) == "203.0.113.7"
+    assert pick_client_ip({"CF-Connecting-IP": "203.0.113.8, 10.0.0.1"}) == "203.0.113.8"
+    assert pick_client_ip({"cf-connecting-ip": "2001:db8::1"}) == "2001:db8::1"
+    # rubbish in the trusted header cannot mint buckets either
+    assert pick_client_ip({"cf-connecting-ip": "not-an-ip"}) == UNIDENTIFIED_CLIENT
+    assert pick_client_ip({"cf-connecting-ip": ""}) == UNIDENTIFIED_CLIENT
+    assert pick_client_ip({}) == UNIDENTIFIED_CLIENT
+    # distinct legitimate clients still get distinct buckets
+    assert pick_client_ip({"cf-connecting-ip": "203.0.113.1"}) != \
+        pick_client_ip({"cf-connecting-ip": "203.0.113.2"})
+
+
+def test_request_size_guard_only_refuses_a_declared_oversize():
+    # The 10MB file cap bounded the two FILES the app parses but not the request:
+    # extra multipart parts rode through (a 210MB request was accepted with a 303).
+    from helpers import max_request_bytes, request_too_large
+
+    limit = max_request_bytes(10 * 1024 * 1024)
+    assert limit > 10 * 1024 * 1024, limit          # file cap plus framing slack
+    assert request_too_large(str(limit + 1), limit) is True
+    assert request_too_large(str(limit), limit) is False
+    # no declared length is NOT "large": a chunked request declares nothing, and the
+    # streaming guard covers it. Refusing here would reject legitimate uploads.
+    assert request_too_large(None, limit) is False
+    assert request_too_large("not-a-number", limit) is False
+    assert request_too_large("", limit) is False
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

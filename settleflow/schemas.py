@@ -24,11 +24,11 @@ Verified & wired (2026-09-11, research in docs/RESEARCH-gateway-samples.md):
   documented 25-column schema and the variant Juspay's own parser reads. Money
   unit RUPEES is vendor-code corroboration, NOT documented — see the loader.
 
-Verified header but deliberately NOT wired: PhonePe's plain settlements report
-and Cashfree's plain settlements report (no public column table — use the
-vendors' JSON APIs) and IDFC statements (no real public sample exists; four
-community parsers corroborate the PDF layout but every one of them tests against
-hand-written mock text). See docs/SCHEMAS.md.
+Verified header but deliberately NOT wired — each for a stated reason, not a lack of
+effort: Cashfree's PLAIN settlements report (a different file from the two-section
+Settlement Recon report above, which IS wired) and IDFC statements (no real public
+sample exists; four community parsers corroborate the PDF layout but every one of
+them tests against hand-written mock text). See docs/SCHEMAS.md.
 """
 from __future__ import annotations
 

@@ -40,6 +40,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -52,15 +53,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # so `import helpers` 
 
 from settleflow import __version__ as settleflow_version  # noqa: E402
 from settleflow import (  # noqa: E402
+    ReconLine,
     Txn,
     classify,
     export_gst_worksheet,
     export_tally_csv,
     export_tds_1035,
+    format_money,
     group_batches,
+    load_cashfree_recon_report,
     load_csv,
+    load_settlement_csv,
     match,
     match_settlements,
+    parse_payu_settlement_range,
+    parse_payu_transaction_details,
     parse_razorpay_recon,
     parse_razorpay_settlements,
 )
@@ -69,7 +76,10 @@ from helpers import (  # noqa: E402  (saas/ is on sys.path via the line above)
     decode_text,
     guess_columns,
     human_bytes,
+    max_request_bytes,
     md_to_html,
+    pick_client_ip,
+    request_too_large,
     valid_email,
 )
 
@@ -95,8 +105,72 @@ RATE_LIMIT_PER_HOUR = int(os.environ.get("SETTLEFLOW_RATE_LIMIT_PER_HOUR", "60")
 _rate_hits: dict[str, deque[float]] = {}
 _rate_lock = threading.Lock()
 
-ACCEPTED_SETTLEMENT_SUFFIXES = (".json",)
 ACCEPTED_BANK_SUFFIXES = (".csv", ".txt", ".tsv")
+
+#: Which settlement formats the hosted service accepts, and what each produces.
+#: These are the formats the LIBRARY already reads — the service was exposing one of
+#: six, so a Cashfree/PhonePe/Juspay/PayU user had no hosted path at all while
+#: /about told them the formats were "not wired".
+#:
+#: A "recon" kind is per-line-item, which is what unlocks the GST and TDS workpapers;
+#: a batch kind is one row per bank credit or per settlement.
+_JSON_SETTLEMENT_KINDS = {
+    # name -> parser -> list[Settlement] (batch) or list[ReconLine] (line item)
+    "razorpay_settlements": parse_razorpay_settlements,
+    "razorpay_recon": parse_razorpay_recon,
+    "payu_settlement_range": parse_payu_settlement_range,
+    "payu_transaction_details": parse_payu_transaction_details,
+}
+_CSV_SETTLEMENT_KINDS = (
+    # name -> the vendor key the loader is registered under. "cashfree_recon_csv" is
+    # special: its one file holds both sections, so it is read as line items.
+    "razorpay_settlement_csv",
+    "phonepe_settlement_csv",
+    "juspay_settlement_csv",
+    "cashfree_settlement_csv",
+    "cashfree_recon_csv",
+)
+SETTLEMENT_KINDS = {**_JSON_SETTLEMENT_KINDS,
+                    **{name: None for name in _CSV_SETTLEMENT_KINDS}}
+
+
+def _accepted_settlement_suffixes(kind: str) -> tuple[str, ...]:
+    return (".json",) if kind in _JSON_SETTLEMENT_KINDS else ACCEPTED_BANK_SUFFIXES
+
+
+def _load_settlement_side(kind: str, raw: bytes) -> tuple[list | None, list | None]:
+    """Read the uploaded settlement file: (batch rows, recon lines).
+
+    Exactly one of the two is returned non-None. Batch rows are matched level-1
+    (one row per bank credit); recon lines are netted per batch and matched level-2,
+    which is also where the GST and TDS workpapers come from.
+    """
+    if kind in _JSON_SETTLEMENT_KINDS:
+        payload = json.loads(
+            raw.decode("utf-8-sig"),
+            parse_float=Decimal,
+            parse_constant=_reject_json_constant,
+        )
+        rows = _JSON_SETTLEMENT_KINDS[kind](payload)
+        if rows and isinstance(rows[0], ReconLine):
+            return None, rows
+        return rows, None
+
+    # The CSV loaders take a path, so the upload goes through a temp file — the same
+    # shape the bank statement already uses, and deleted in the finally.
+    suffix = ".csv"
+    with tempfile.NamedTemporaryFile("wb", suffix=suffix, delete=False) as fh:
+        fh.write(raw)
+        path = fh.name
+    try:
+        if kind == "cashfree_recon_csv":
+            # Two sections in one file; read the event section as line items and let
+            # the line-item path do the netting (its per-UTR net equals the batch total).
+            _batches, lines = load_cashfree_recon_report(path)
+            return None, lines
+        return load_settlement_csv(path, kind), None
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 #: Whitelist, so no request value ever reaches SQL string interpolation.
 _EXPORTS = {
@@ -140,6 +214,95 @@ async def _no_store_private_paths(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
+
+
+class _BodySizeLimit:
+    """Refuse a request whose body exceeds the service ceiling.
+
+    The app's own `MAX_UPLOAD_BYTES` cap only sees the two files it parses. The
+    multipart parser bounds each form FIELD at 1MB but spools file parts with no
+    size check, so extra parts rode straight through: a 210MB request carrying one
+    unnamed part was answered 303 while a 10.5MB named file was refused with a 413.
+    The advertised ceiling was therefore not the effective one, and the only real
+    bound was whatever the proxy allowed.
+
+    Checks the declared Content-Length first (cheap, and the ordinary case), then
+    counts the bytes as they arrive, so a chunked request with no declared length
+    cannot walk past either.
+    """
+
+    def __init__(self, app, limit: int) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        declared = next(
+            (value.decode("latin-1") for key, value in scope.get("headers", [])
+             if key.lower() == b"content-length"),
+            None,
+        )
+        if request_too_large(declared, self.limit):
+            await _send_413(send, self.limit)
+            return
+
+        state = {"seen": 0, "exceeded": False, "started": False}
+
+        async def counted_receive():
+            message = await receive()
+            if message["type"] == "http.request":
+                state["seen"] += len(message.get("body", b""))
+                if state["seen"] > self.limit:
+                    state["exceeded"] = True
+                    # Stop feeding the parser so the request unwinds; the 413 is
+                    # sent below, outside the app.
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def tracked_send(message):
+            if message["type"] == "http.response.start":
+                state["started"] = True
+            await send(message)
+
+        try:
+            await self.app(scope, counted_receive, tracked_send)
+        except Exception:
+            # Only swallow the failure our own trip caused; a real bug still raises.
+            if not state["exceeded"] or state["started"]:
+                raise
+        if state["exceeded"] and not state["started"]:
+            await _send_413(send, self.limit)
+
+
+async def _send_413(send, limit: int) -> None:
+    """The too-large page, sent from middleware so it needs no route."""
+    body = (
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>That upload was too large</title></head><body>"
+        "<h1>That upload was too large</h1>"
+        f"<p>The whole request must be under {human_bytes(limit)}. Settlement and "
+        "recon files are normally a few hundred KB.</p>"
+        "<p>Nothing was uploaded or stored. "
+        "<a href=\"/\">Go back</a> and try again with a smaller file.</p>"
+        "</body></html>\n"
+    ).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": 413,
+        "headers": [
+            (b"content-type", b"text/html; charset=utf-8"),
+            (b"content-length", str(len(body)).encode("latin-1")),
+            (b"cache-control", b"no-store, private"),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(_BodySizeLimit, limit=max_request_bytes(MAX_UPLOAD_BYTES))
 
 
 # ---------------------------------------------------------------------------
@@ -232,16 +395,16 @@ def _new_token() -> str:
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort client identity for rate limiting.
+    """The caller's address for rate limiting.
 
-    Trusts the first X-Forwarded-For hop because the only path in is the
-    Cloudflare tunnel on loopback; there is no direct public route to this port.
-    A spoofed header can only affect the spammer's own bucket.
+    Delegates to helpers.pick_client_ip so the rule is testable without FastAPI and
+    is stated once: only Cloudflare's CF-Connecting-IP counts, and a request without
+    it shares one bucket. Neither X-Forwarded-For nor the socket peer is usable —
+    uvicorn rewrites scope["client"] from XFF when the connection arrives from a
+    trusted proxy, and our tunnel arrives from loopback, so both were spoofable
+    (70 requests claiming 70 addresses: 70 accepted, 0 rejected).
     """
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return pick_client_ip(request.headers)
 
 
 def _rate_ok(ip: str) -> bool:
@@ -289,6 +452,17 @@ def _require_suffix(upload: UploadFile, allowed: tuple[str, ...], what: str) -> 
             f"{name!r} does not look like a {what} file "
             f"(expected {' or '.join(allowed)}).",
         )
+
+
+def _reject_json_constant(name: str):
+    """Refuse the bare NaN / Infinity literal in a settlement payload.
+
+    Python's `json` accepts them even though they are not JSON, and as money they
+    are meaningless: they would flow into the export layer's quantize() and raise
+    mid-request, turning a bad file into a 500. Raising here means the caller gets
+    a 400 naming the problem.
+    """
+    raise ValueError(f"{name} is not a valid amount in a settlement file")
 
 
 # ---------------------------------------------------------------------------
@@ -390,11 +564,13 @@ shows you the exceptions. Nothing here is tax advice.
 
 ## What is not built yet
 
-Cashfree, PhonePe, Juspay and PayU settlement formats are not wired — their
-schemas need a real published sample, and guessing a vendor's column layout is
-how silently wrong ledgers get made. If you can share one export from your
-dashboard, that format gets built.
-""",
+Nothing here pretends. The engine reads Razorpay (API JSON and CSV), PayU's two
+settlement APIs, and Cashfree, PhonePe and Juspay settlement exports. A format we
+have no verified sample for is refused rather than guessed at — guessing a column
+layout is how silently wrong ledgers get made — and the two still open are noted in
+the repository: IDFC bank statements, and Cashfree's plain (non-recon) settlements
+export.
+"""
     ),
     "pricing": (
         "Pricing",
@@ -404,7 +580,10 @@ and no trial clock — upload the two files, get the workpapers.
 **Self-hosting is free, permanently.** The engine is MIT-licensed. Run it on your
 own machine and nothing leaves your network:
 
-`pip install settleflow`
+`pip install git+https://github.com/AtlasNex/settleflow.git`
+
+(Not on PyPI yet — installing from the repository is the supported path today, so
+that is the command shown rather than one that would fail.)
 
 ## Why it is free right now
 
@@ -566,8 +745,11 @@ def llms_txt(request: Request) -> str:
 - Contact: {CONTACT_EMAIL}
 - Data handling: uploaded files are used for the single reconciliation; the run
   record is deleted after {RETENTION_DAYS} days.
-- Not available here: Cashfree, PhonePe, Juspay and PayU settlement formats
-  (awaiting a real published sample), e-filing, tax advice.
+- Settlement formats accepted: Razorpay (API JSON and CSV exports), PayU (the two
+  settlement APIs), Cashfree (Settlement Recon report), PhonePe, Juspay.
+- Not available here: IDFC bank statements and Cashfree's plain (non-recon)
+  settlements export — no verified sample exists, so they are refused rather than
+  guessed at. Also not offered: e-filing, tax advice.
 """
 
 
@@ -678,7 +860,15 @@ async def reconcile(
     if not _rate_ok(_client_ip(request)):
         raise HTTPException(429, "Too many reconciliations from this connection.")
 
-    _require_suffix(settlement_file, ACCEPTED_SETTLEMENT_SUFFIXES, "settlement (JSON)")
+    kind = (settlement_kind or "").strip()
+    if kind not in SETTLEMENT_KINDS:
+        raise HTTPException(
+            400,
+            f"Unknown settlement kind {kind!r}. Supported: "
+            f"{', '.join(sorted(SETTLEMENT_KINDS))}.",
+        )
+
+    _require_suffix(settlement_file, _accepted_settlement_suffixes(kind), "settlement")
     _require_suffix(bank_file, ACCEPTED_BANK_SUFFIXES, "bank statement (CSV)")
 
     settlement_raw = _read_capped(settlement_file, MAX_UPLOAD_BYTES)
@@ -686,29 +876,20 @@ async def reconcile(
 
     # --- settlement side -------------------------------------------------
     try:
-        payload = json.loads(settlement_raw.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        settlements, recon_lines = _load_settlement_side(kind, settlement_raw)
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
+        # ValueError covers json.JSONDecodeError (a subclass) and the parsers'
+        # fail-closed refusals, whose own sentence is the most useful text we have;
+        # KeyError/TypeError cover a payload that is merely the wrong shape. Those
+        # are the CALLER's file, not our bug, so they are a 400 and not a 500.
+        raise HTTPException(400, f"That settlement file could not be read: {exc}") from exc
+
+    if not settlements and not recon_lines:
         raise HTTPException(
             400,
-            "The settlement file is not valid JSON. Download the settlement "
-            f"export again and re-upload it ({type(exc).__name__}).",
-        ) from exc
-
-    settlements, recon_lines = None, None
-    try:
-        if settlement_kind == "razorpay_settlements":
-            settlements = parse_razorpay_settlements(payload)
-        elif settlement_kind == "razorpay_recon":
-            recon_lines = parse_razorpay_recon(payload)
-        else:
-            raise HTTPException(400, f"Unknown settlement kind {settlement_kind!r}.")
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        # The recon parser fails closed on an unexpected field set. Surface that
-        # as a 400 with the parser's own sentence: it is the most useful text we
-        # have, and silently loosening the schema is forbidden (CONSTRAINTS #2).
-        raise HTTPException(400, f"That settlement file could not be read: {exc}") from exc
+            f"That {kind} file contained no rows we could read. Check that it is the "
+            "right export for that settlement kind, and that the period is not empty.",
+        )
 
     # --- bank side -------------------------------------------------------
     bank_text = decode_text(bank_raw)
@@ -764,6 +945,11 @@ async def reconcile(
         result = match(settlement_txns, bank)
         gst_csv = export_gst_worksheet(recon_lines)
         tds1035_csv = export_tds_1035(recon_lines)
+    elif settlements and isinstance(settlements[0], Txn):
+        # A CSV vendor loader already yields bank-credit rows (Txn); an API parser
+        # yields Settlement batches, which match_settlements converts. Same engine,
+        # two input shapes.
+        result = match(settlements, bank)
     else:
         result = match_settlements(settlements, bank)
 
@@ -771,19 +957,22 @@ async def reconcile(
     exceptions = classify(result)
 
     result_json = json.dumps({
+        # format_money, not str(): the page and the CSV it links to are the same
+        # workpaper, and they used to disagree ('100' on the page, '100.00' in the
+        # export) because a raw Decimal drops trailing zeros.
         "matched": [{"settlement": m.settlement.ref, "bank": m.bank.utr,
-                     "amount": str(m.settlement.amount), "status": m.status.value}
+                     "amount": format_money(m.settlement.amount), "status": m.status.value}
                     for m in result.matched],
-        "settlement_only": [{"ref": t.ref, "amount": str(t.amount)}
+        "settlement_only": [{"ref": t.ref, "amount": format_money(t.amount)}
                             for t in result.settlement_only],
-        "bank_only": [{"utr": t.utr, "amount": str(t.amount)}
+        "bank_only": [{"utr": t.utr, "amount": format_money(t.amount)}
                       for t in result.bank_only],
-        "matched_total": str(result.matched_total),
-        "unmatched_settlement_total": str(result.unmatched_settlement_total),
-        "unmatched_bank_total": str(result.unmatched_bank_total),
+        "matched_total": format_money(result.matched_total),
+        "unmatched_settlement_total": format_money(result.unmatched_settlement_total),
+        "unmatched_bank_total": format_money(result.unmatched_bank_total),
     })
     exceptions_json = json.dumps([
-        {"category": e.category, "amount": str(e.amount), "detail": e.detail,
+        {"category": e.category, "amount": format_money(e.amount), "detail": e.detail,
          "utr": e.utr, "ref": e.ref}
         for e in exceptions
     ])
@@ -795,13 +984,13 @@ async def reconcile(
             "INSERT INTO runs (created_at, kind, result_json, exceptions_json, "
             "tally_csv, gst_csv, tds1035_csv, run_token, mapping_json) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (datetime.now(timezone.utc).isoformat(), settlement_kind, result_json,
+            (datetime.now(timezone.utc).isoformat(), kind, result_json,
              exceptions_json, tally_csv, gst_csv, tds1035_csv, token,
              json.dumps(mapping)),
         )
         run_id = cur.lastrowid
 
-    print(f"[settleflow] run {run_id} kind={settlement_kind} "
+    print(f"[settleflow] run {run_id} kind={kind} "
           f"matched={len(result.matched)} exceptions={len(exceptions)}",
           flush=True)
 
