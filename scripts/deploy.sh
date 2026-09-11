@@ -67,6 +67,16 @@ SHIP=(settleflow saas scripts docs/legal tests pyproject.toml README.md LICENSE)
 # Files removed from the app but still present on the server from older deploys.
 # tar cannot delete, so regressions caused by a deleted file have to be named here.
 REMOVED=(saas/templates/runs.html)
+# NEVER ship server state. `saas` is in the allowlist above and the run database
+# lives inside it (saas/app.py: DB_PATH = BASE/"settleflow.db"), so an unfiltered
+# tar would overwrite the production database with this machine's local one on
+# every deploy — destroying every customer's run URL and every captured lead,
+# while this script reported success. `scripts/.deploy.env` is gitignored because
+# it holds the origin host, but tar does not read .gitignore either. Excluding is
+# the fix; deleting them remotely would be the opposite of one.
+TAR_EXCLUDES=(--exclude='__pycache__' --exclude='*.pyc' --exclude='*.db'
+              --exclude='*.db-wal' --exclude='*.db-shm' --exclude='.deploy.env'
+              --exclude='*.sqlite' --exclude='*.sqlite3')
 
 cd "$(dirname "$0")/.." || die "cannot cd to repo root"
 REPO="$PWD"
@@ -86,6 +96,17 @@ REV="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 TS="$(ssh -o BatchMode=yes "$HOST" 'date -u +%Y%m%d-%H%M%S')"
 echo "shipping revision $REV at $TS"
 
+step "preflight: the live run count (the data-loss tripwire)"
+# The deploy must never reduce stored runs. A tarball that carries the developer's
+# local saas/settleflow.db would silently replace the server's database with it;
+# TAR_EXCLUDES stops that, and this guard means the *next* time someone ships
+# server state by accident, the deploy fails instead of reporting success.
+RUNS_BEFORE="$(ssh -o BatchMode=yes "$HOST" \
+  "curl -s -m 5 http://127.0.0.1:$LOCAL_PORT/health" 2>/dev/null \
+  | sed -n 's/.*\"runs\": *\([0-9][0-9]*\).*/\1/p')"
+[ -n "$RUNS_BEFORE" ] || die "could not read the live run count — refusing to deploy blind"
+echo "  runs before: $RUNS_BEFORE"
+
 if [ "$SKIP_BACKUP" -eq 0 ]; then
   step "backup: previous code on the server (code only — the .venv is not copied)"
   # No `|| true` on the tar and an explicit `test -s`: a backup step that can pass
@@ -100,7 +121,7 @@ if [ "$SKIP_BACKUP" -eq 0 ]; then
       [ -e \"\$p\" ] && existing=\"\$existing \$p\" || true
     done
     test -n \"\$existing\"
-    tar czf $BACKUP_DIR/$TS.tar.gz --exclude='__pycache__' --exclude='*.pyc' \$existing
+    tar czf $BACKUP_DIR/$TS.tar.gz --exclude='__pycache__' --exclude='*.pyc' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='*.sqlite' --exclude='*.sqlite3' \$existing
     test -s $BACKUP_DIR/$TS.tar.gz
     ls -1t $BACKUP_DIR/*.tar.gz | tail -n +$((KEEP_BACKUPS+1)) | xargs -r rm -f
     echo \"  backup: $BACKUP_DIR/$TS.tar.gz (\$(du -h $BACKUP_DIR/$TS.tar.gz | cut -f1)), contains:\$existing\"
@@ -111,7 +132,7 @@ step "ship: $REV"
 for f in "${REMOVED[@]}"; do
   >&2 ssh -o BatchMode=yes "$HOST" "rm -f $REMOTE_DIR/$f"
 done
-tar czf - --exclude='__pycache__' --exclude='*.pyc' "${SHIP[@]}" \
+tar czf - "${TAR_EXCLUDES[@]}" "${SHIP[@]}" \
   | ssh -o BatchMode=yes "$HOST" "tar xzf - -C $REMOTE_DIR" \
   || die "file transfer failed"
 
@@ -142,6 +163,17 @@ case "$HEALTH" in
   *) >&2 ssh -o BatchMode=yes "$HOST" "journalctl -u $UNIT -n 40 --no-pager"
      die "health check never came up — roll back with: bash scripts/rollback.sh $TS" ;;
 esac
+
+step "verify: the deploy did not lose data"
+RUNS_AFTER="$(printf '%s' "$HEALTH" | sed -n 's/.*"runs": *\([0-9][0-9]*\).*/\1/p')"
+[ -n "$RUNS_AFTER" ] || die "health came up without a run count — cannot prove data intact"
+echo "  runs before: $RUNS_BEFORE   runs after: $RUNS_AFTER"
+if [ "$RUNS_AFTER" -lt "$RUNS_BEFORE" ]; then
+  die "the run count DROPPED ($RUNS_BEFORE -> $RUNS_AFTER): this deploy overwrote the
+     server database with local state. Do not re-run the deploy. Restore the server
+     database from the backup on the host, then fix what shipped server state
+     (TAR_EXCLUDES in this script is the place)."
+fi
 
 step "verify: end-to-end canary on the server (real reconcile round-trip)"
 if ! ssh -o BatchMode=yes "$HOST" \

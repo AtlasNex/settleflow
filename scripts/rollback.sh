@@ -57,7 +57,7 @@ ssh -o BatchMode=yes "$HOST" "
   for p in settleflow saas scripts docs pyproject.toml; do
     [ -e \"\$p\" ] && existing=\"\$existing \$p\" || true
   done
-  tar czf $BACKUP_DIR/pre-rollback-$NOW.tar.gz --exclude='__pycache__' --exclude='*.pyc' \$existing
+  tar czf $BACKUP_DIR/pre-rollback-$NOW.tar.gz --exclude='__pycache__' --exclude='*.pyc' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='*.sqlite' --exclude='*.sqlite3' \$existing
   test -s $BACKUP_DIR/pre-rollback-$NOW.tar.gz
   tar xzf $BACKUP_DIR/$TARGET.tar.gz -C $REMOTE_DIR
   echo '  restored $TARGET (current state saved as pre-rollback-$NOW.tar.gz)'
