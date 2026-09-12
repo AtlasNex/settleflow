@@ -571,3 +571,35 @@ survived because the OSS component layer is genuinely un-owned.
 - **Evidence:** `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`
   (kept outside the public repo; contains the ingress description, not the origin address).
 - **Model:** qwen3.8-flash. **Date:** 2026-09-11.
+
+### D-42: Rate-limit identity is deployment-aware (peer evidence + global window); the PDF/OCR layer gets explicit work ceilings
+
+- **Decision (identity).** Strix's suggested fix for vuln-0002 gated the trusted header on a
+  LOOPBACK peer — correct for the live topology (verified on the box: settleflow.service runs
+  plain uvicorn on 127.0.0.1:8093, cloudflared connects from loopback), but it breaks the repo's
+  own documented Docker path: with userland port-mapping the container-side peer of EVERY
+  connection is the bridge gateway (172.17.0.1) — private, constant, never loopback — and a
+  loopback-only gate would collapse all clients into one shared bucket there. `pick_client_ip
+  (headers, peer)` therefore trusts `CF-Connecting-IP` only when the peer is an INTERMEDIARY
+  (loopback or RFC1918/link-local) — the address D-41 proved the edge sets — and keys a PUBLIC
+  peer on its own socket address, which its owner cannot mint per request. IPv6 spellings
+  canonicalize to one bucket. `SETTLEFLOW_GLOBAL_RATE_LIMIT_PER_HOUR` (600) adds the
+  identity-independent window (vuln-0010's chain-breaking half): the per-identity key can be
+  minted away, this cannot.
+- **Decision (work bounds).** The upload caps bound bytes, not work. `MAX_STATEMENT_ROWS` (200k
+  lines — ~30x the largest real CA statement; a compact-JSON payload cannot exceed ~190k items
+  inside the same 10MB cap, so one check bounds both sides) refuses over-wide uploads with a clear
+  400; `reconcile` became a synchronous handler (FastAPI thread pool — the event loop stays
+  responsive: health worst 594ms during a 150k-row run, previously a 6.3s full stall) under a
+  2-slot semaphore (3 concurrent heavies -> 303/303/429). The PDF/OCR layer (library-only, not
+  reachable from the hosted route) gets: 50 pages, 2MB decoded content-stream per page (stored
+  compressed length never trusted), 2M accumulated text chars, 40MP raster ceiling computed BEFORE
+  get_pixmap (MediaBox is author-chosen), per-page temp-dir release, and a 120s tesseract timeout
+  surfaced as `PdfResourceLimitError(ValueError)`. Residual, stated: one page's parse cost cannot
+  be bounded inside the process — untrusted-file callers run that layer under an external memory/
+  CPU limit. Prod runtime is settleflow.service (plain uvicorn, NOT docker — the compose file is
+  a dev artifact), so a compose MemoryLimit would be dead weight; recheck at scale.
+- **Why.** Both write-ups' suggested fixes were verified against a topology the service does not
+  run; the shipped rules are the deployment-aware generalisations, each with a live gate and a
+  self-check assert.
+- **Model:** qwen3.8-flash. **Date:** 2026-09-13.
