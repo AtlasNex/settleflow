@@ -641,3 +641,92 @@ Filed as ATL-242; the credits blocker was added to the owner-gated list (ATL-218
 **State at final close.** Repo clean at the closeout commit, pushed, CI green apart from the credits
 blocker. `hermes verify --skip-start` → `ok: true`, **all 74 checks passed**, port 8000 clear before
 and after. Live service untouched: **v0.7.3, 165 runs**. Nothing deployed.
+
+## 2026-09-11 — Session 17 (the probe, the deploy, and the Nous pivot) — glm-5.3-flash
+
+Continued from session 16's cold-start prompt (`docs/PROMPT-continue-settleflow.md`). Model:
+glm-5.3-flash (baibase). Board: ATL-244 (probe), ATL-246 (deploy) — both done with evidence
+comments.
+
+### 1. The single most important open question is ANSWERED (ATL-244)
+
+**Can a caller supply `CF-Connecting-IP` through the Cloudflare tunnel? → NO.** Method: origin-side
+header-echo listener (temp `/tmp/cf_passthrough_probe.py` on the VPS, tunnel ingress retargeted
+settleflow→:8097 via CF API `PUT cfd_tunnel/{id}/configurations`, backed up first, restored verbatim
+~2 min later, health re-verified after).
+
+- Any request with a client-supplied CCI → **403 `error code 1000` at the edge** (`Server:
+  cloudflare`), six value variants, GET and POST. Origin echo log: **zero** CCI-carrying requests
+  passed. Cloudflare sets CCI itself.
+- **`X-Forwarded-For` IS caller-controlled**: client value passes through as FIRST hop, real IP
+  appended (echo-proved).
+- Direct-to-origin: port 8093 does not accept internet connections (loopback bind) — tunnel is the
+  only ingress.
+
+Consequences: vuln-0010's HIGH chain breaks at its identity link **on this topology** (Strix tested
+a local instance with no Cloudflare in front) — but re-arms the moment the origin is ever exposed
+directly, so "127.0.0.1 bind + tunnel-only ingress" is a binding deploy invariant (D-41). The bypass
+IS live on v0.7.3 via first-hop XFF → deploy urgency raised with evidence. vuln-0002 (amplification:
+~7 s stall, ~881 MB peak, ~72 MB durable DB per in-limits request) is unaffected — top ATL-242 item.
+Residual: IPv6 callers rotate real CCI naturally → the cost ceiling (0002's fix) is the honest
+defense. Evidence: `strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md` (outside the repo; no
+origin IP in it). Also confirmed live `scripts/deploy.sh` was PRE-`7fc77ef` (the DB-overwrite bug was
+still armed on the server copy) — fixed by the deploy below.
+
+### 2. DEPLOYED — v0.7.4 is live (ATL-246, Sanjay authorised)
+
+Version bump 0.7.3→0.7.4 (pyproject + `settleflow/__init__.py`, release commit `85a0f2f`) so
+`/health` proves the cutover (canary only asserts a version is reported — checked). `bash
+scripts/deploy.sh` run (moved to background mid-flight by an incoming message, exited 0); every
+claim below verified independently of the script's stdout:
+
+- `/health` → `{"status":"ok","version":"0.7.4","runs":173}`; runs never dropped (169→173; delta is
+  canary traffic). Tripwire holds.
+- Origin `/opt/settleflow/saas/app.py`: zero `x-forwarded-for` references; `_client_ip` delegates to
+  `helpers.pick_client_ip` (`TRUSTED_CLIENT_IP_HEADER = "cf-connecting-ip"`). **Live XFF bypass
+  closed.** `__init__.py` = 0.7.4. Backup: `/opt/settleflow-backups/20260911-142122.tar.gz`
+  (rollback: `bash scripts/rollback.sh latest`).
+- Watchdog canary vs public URL: exit 0, silent = all checks passed. (Running `scripts/canary.py`
+  directly FAILS on a laptop — it targets 127.0.0.1:8093; use the wrapper
+  `C:/Users/sanja/AppData/Local/hermes/scripts/settleflow_canary.py`.)
+- CI green on `85a0f2f` (Security Scan still red on CommandCode credits only).
+- `hermes verify --skip-start` → ok:true, 74 checks, port 8000 clear before/after.
+
+### 3. The D-40 order is now mid-flight
+
+deploy ✅ → **remediate ATL-242 (next)** → deploy again (0.7.5). Remediation order on the board:
+vuln-0002 (work bounds), 0001/0011 (/notify), 0005/0007/0009, the rest. A second deploy re-arms the
+run-count tripwire correctly (it only fails if runs DROP).
+
+### 4. Strix provider: CommandCode is dead, the Nous Portal pivot is half-proven
+
+Sanjay's call: "Run on any free llm from nous. with long context and smart one." Findings:
+
+- Hermes' Nous auth is OAuth at `C:/Users/sanja/AppData/Local/hermes/auth.json`
+  (`providers.nous`): 1-h `access_token` + rotating `refresh_token`. The 1-h JWT **works on
+  `inference-api.nousresearch.com/v1`**: `z-ai/glm-5.3` → HTTP 200, `finish_reason=tool_calls`,
+  correct tool args (the Strix contract, D-39-compatible). `moonshotai/kimi-k3` answered but no
+  tool_calls in that probe; `qwen/qwen3.8-max-0902` → 400.
+- **A 1-h JWT cannot live in CI** (scan ≈ 49+ min, token expires, and the refresh token ROTATES on
+  use — racing it from CI would break this laptop's auth). The static `OPENAI_API_KEY` in .env is
+  NOT a Nous inference key (401 invalid/blocked).
+- **CI needs a durable Portal API key** (`NOUS_API_KEY` is a supported static credential per
+  hermes_cli code + doctor.py). Minting is dashboard-only: portal.nousresearch.com/api-docs ("Manage
+  your account and API keys here"). No public mint endpoint found (probed). Browser attempts to open
+  the dashboard stalled on Chrome's "Allow remote debugging?" approval — **needs Sanjay's click**.
+- **NEXT SESSION, Strix = two owner-gated clicks away:** (1) Sanjay creates an API key at
+  portal.nousresearch.com/api-docs (or Settings → API keys), (2) paste it to Hermes (vault), (3) flip
+  `security.yml` env: `STRIX_LLM: openai/z-ai/glm-5.3`, `LLM_API_BASE:
+  https://inference-api.nousresearch.com/v1`, `LLM_API_KEY: ${{ secrets.NOUS_API_KEY }}` (same
+  pattern as the CommandCode wiring in `b14c87a`), commit, watch the run. Know the cost: the last
+  `quick` scan was 85.5M tokens; "free" on Nous means billed to the subscription, not unmetered.
+  Keep D-39's contract: non-thinking model, tool-calling verified, 403 error-1010 = Cloudflare bot
+  wall.
+
+### State at close (2026-09-11, session 17)
+
+- Repo clean at `85a0f2f`, pushed. Live: **v0.7.4, 173 runs**, canary green, watchdog active.
+- Board: ATL-244 done, ATL-246 done (evidence comments), ATL-242 has the re-ranked order comment,
+  ATL-218 blocked (owner-gated, now including the Portal API key), ATL-230 (rename) still deferred
+  behind the real-money trial.
+- Cold-start for the next session: `docs/PROMPT-continue-settleflow.md` (updated for this close).
