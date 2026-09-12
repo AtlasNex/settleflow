@@ -81,32 +81,72 @@ def _is_ip(value: str) -> bool:
     return True
 
 
-def pick_client_ip(headers, trusted_header: str = TRUSTED_CLIENT_IP_HEADER) -> str:
+def _is_intermediary_peer(peer: str | None) -> bool:
+    """Whether `peer` looks like a proxy/ intermediary rather than the end client.
+
+    Loopback (cloudflared on the host, the local dev server) and the RFC1918/link-
+    local ranges (the docker bridge gateway, which is the container-side peer of
+    EVERY connection through the published port, tunnel or not) both mean "the
+    address the request arrived from is an intermediary, not the caller".
+
+    Note: Python's `is_private` also covers the reserved TEST-NET ranges
+    (203.0.113.0/24 etc.), which are documentation addresses that never appear as
+    a real TCP peer — a socket peer is either genuinely routable or internal.
+    Tests for the public-peer branch must use a real public address (8.8.8.8).
+    """
+    if not peer:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private
+
+
+def pick_client_ip(
+    headers,
+    peer: str | None = None,
+    trusted_header: str = TRUSTED_CLIENT_IP_HEADER,
+) -> str:
     """The identity to rate-limit on. Never trusts caller-controlled input.
 
-    The rule is deliberately narrow, because two seemingly-reasonable sources are
-    both caller-controlled in practice:
+    Two sources look reasonable and are both caller-controlled in practice:
 
     * `X-Forwarded-For` is written by the caller — trusting its first hop let 70
       requests claiming 70 addresses each open a fresh bucket (verified: 70
       accepted, 0 rejected), so the per-hour limit simply vanished.
-    * the socket peer is not safe either. Uvicorn rewrites `scope["client"]` from
-      X-Forwarded-For when the connection arrives from a trusted proxy address, and
-      the Cloudflare tunnel connects from loopback — so an XFF header still changed
-      the bucket (verified: 10 requests with rotating XFF after the bucket was
-      already exhausted were all accepted).
+    * the socket peer is not safe on a bare host either. Uvicorn rewrites
+      `scope["client"]` from X-Forwarded-For when the connection arrives from a
+      trusted proxy address, and the Cloudflare tunnel connects from loopback — so
+      an XFF header still changed the bucket (verified: 10 requests with rotating
+      XFF after the bucket was already exhausted were all accepted).
 
-    So: the trusted header is the ONLY per-client identity, and it must parse as an
-    address so a junk value cannot mint unlimited buckets. With no trusted header
-    the request has no trustworthy identity and every such request shares ONE bucket
-    — conservative and fail-safe, and the correct behaviour for an origin whose only
-    legitimate ingress is the tunnel that sets that header.
+    The rule, per D-41's probe (the edge 403s any caller-supplied
+    CF-Connecting-IP, so through the tunnel the header is edge-set):
+
+    * peer is an intermediary (loopback, or the docker bridge gateway which is the
+      container-side peer of every published-port connection): the trusted header
+      is the ONLY per-client identity — it must parse as an address so a junk
+      value cannot mint unlimited buckets, and it is canonicalized via
+      `ipaddress.ip_address` so the alternate textual spellings of one IPv6
+      address (`::1`, `0::1`, `0000:...:0001`) share one bucket instead of one each.
+    * peer is public: the request reached the origin WITHOUT an intermediary, so
+      the caller chose whatever headers it carries and is keyed on its own peer
+      address instead — a value it cannot mint away per request.
+    * no peer (direct helpers callers, the self-check): header-if-valid else the
+      ONE shared unidentified bucket — conservative and fail-safe.
+
+    ponytail: in-memory windows, per-process; correct for the single-container
+    deployment. Multi-worker → move the counters to sqlite before scaling out.
     """
+    if peer is not None and not _is_intermediary_peer(peer):
+        return str(ipaddress.ip_address(peer)) if _is_ip(peer) else UNIDENTIFIED_CLIENT
     trusted = _header(headers, trusted_header)
     if trusted:
         candidate = trusted.split(",")[0].strip()
         if candidate and _is_ip(candidate):
-            return candidate
+            # Canonicalize so one address has one bucket regardless of spelling.
+            return str(ipaddress.ip_address(candidate))
     return UNIDENTIFIED_CLIENT
 
 

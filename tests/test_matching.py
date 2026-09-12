@@ -1423,6 +1423,32 @@ def test_pick_client_ip_trusts_only_the_cloudflare_header():
     # distinct legitimate clients still get distinct buckets
     assert pick_client_ip({"cf-connecting-ip": "203.0.113.1"}) != \
         pick_client_ip({"cf-connecting-ip": "203.0.113.2"})
+    # (peer=None above: legacy helpers callers) --- now the peer-aware rule.
+    # Peer is an intermediary (loopback / the docker bridge gateway): the edge-set
+    # trusted header is the identity, canonicalized so one IPv6 address has ONE
+    # bucket across its textual spellings (vuln-0002).
+    from helpers import _is_intermediary_peer, pick_client_ip as _pcip
+    assert _is_intermediary_peer("127.0.0.1")
+    assert _is_intermediary_peer("172.17.0.1")   # docker bridge gateway
+    assert _is_intermediary_peer("10.0.0.5")
+    assert _is_intermediary_peer("::1")
+    assert not _is_intermediary_peer("8.8.8.8")   # genuinely public peer
+    assert not _is_intermediary_peer(None)
+    assert not _is_intermediary_peer("not-an-ip")
+    assert _pcip({"cf-connecting-ip": "203.0.113.7"}, "127.0.0.1") == "203.0.113.7"
+    assert _pcip({"cf-connecting-ip": "203.0.113.7"}, "172.17.0.1") == "203.0.113.7"
+    assert _pcip({"cf-connecting-ip": "::0001"}, "::1") == "::1"
+    for spelling in ("0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001",
+                     "::0001", "0::1"):
+        assert _pcip({"cf-connecting-ip": spelling}, "127.0.0.1") == "::1"
+    # Peer is public: the caller reached the origin WITHOUT the tunnel, so it chose
+    # its own headers — it is keyed on its peer, and CCI cannot mint it a bucket.
+    assert _pcip({"cf-connecting-ip": "198.51.100.1"}, "8.8.8.8") == "8.8.8.8"
+    assert _pcip({"cf-connecting-ip": "198.51.100.2"}, "8.8.8.8") == "8.8.8.8"
+    assert _pcip({}, "8.8.8.8") == "8.8.8.8"
+    assert _pcip({}, "not-an-ip") == UNIDENTIFIED_CLIENT
+    # a public peer with an invalid CCI still gets its own (single) identity
+    assert _pcip({"cf-connecting-ip": "junk"}, "8.8.8.8") == "8.8.8.8"
 
 
 def test_request_size_guard_only_refuses_a_declared_oversize():

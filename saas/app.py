@@ -103,7 +103,16 @@ RETENTION_DAYS = int(os.environ.get("SETTLEFLOW_RETENTION_DAYS", "30"))
 #: Correct for a single-instance service; if this ever runs multi-worker, move the
 #: counter to sqlite (same table, one more column) rather than reaching for Redis.
 RATE_LIMIT_PER_HOUR = int(os.environ.get("SETTLEFLOW_RATE_LIMIT_PER_HOUR", "60"))
+#: Identity-independent ceiling on /reconcile. The per-identity window keys on
+#: CF-Connecting-IP, so a caller that can choose that header mints a fresh bucket
+#: per request; this window counts every accepted request, so the total rate stays
+#: bounded even if the identity assumption is broken again. It bounds request
+#: COUNT, not the cost of one request — the derived-work cap is the other half.
+GLOBAL_RATE_LIMIT_PER_HOUR = int(
+    os.environ.get("SETTLEFLOW_GLOBAL_RATE_LIMIT_PER_HOUR", "600")
+)
 _rate_hits: dict[str, deque[float]] = {}
+_global_hits: deque[float] = deque()
 _rate_lock = threading.Lock()
 
 ACCEPTED_BANK_SUFFIXES = (".csv", ".txt", ".tsv")
@@ -399,24 +408,35 @@ def _client_ip(request: Request) -> str:
     """The caller's address for rate limiting.
 
     Delegates to helpers.pick_client_ip so the rule is testable without FastAPI and
-    is stated once: only Cloudflare's CF-Connecting-IP counts, and a request without
-    it shares one bucket. Neither X-Forwarded-For nor the socket peer is usable —
-    uvicorn rewrites scope["client"] from XFF when the connection arrives from a
-    trusted proxy, and our tunnel arrives from loopback, so both were spoofable
-    (70 requests claiming 70 addresses: 70 accepted, 0 rejected).
+    is stated once. The peer is passed so the rule is deployment-aware: a request
+    that arrived through an intermediary (loopback cloudflared, or the docker
+    bridge gateway that fronts every published-port connection) is keyed on the
+    edge-set CF-Connecting-IP (D-41: the edge 403s caller-supplied values), while
+    a request whose peer is public reached the origin directly and is keyed on
+    that peer — a value its owner cannot mint away per request. X-Forwarded-For
+    stays untrusted either way: its first hop was 70 accepted / 0 rejected.
     """
-    return pick_client_ip(request.headers)
+    return pick_client_ip(request.headers,
+                          request.client.host if request.client else None)
 
 
 def _rate_ok(ip: str) -> bool:
     now = time.time()
     with _rate_lock:
+        # The identity-independent window first: the per-identity key can be
+        # minted away by claiming a fresh address per request, this one cannot.
+        # It bounds the request RATE, not the cost of one request.
+        while _global_hits and now - _global_hits[0] > 3600:
+            _global_hits.popleft()
+        if len(_global_hits) >= GLOBAL_RATE_LIMIT_PER_HOUR:
+            return False
         hits = _rate_hits.setdefault(ip, deque())
         while hits and now - hits[0] > 3600:
             hits.popleft()
         if len(hits) >= RATE_LIMIT_PER_HOUR:
             return False
         hits.append(now)
+        _global_hits.append(now)
         return True
 
 
@@ -500,7 +520,8 @@ def _http_error(request: Request, exc: HTTPException) -> HTMLResponse:
              f"are deleted after {RETENTION_DAYS} days.",
         413: "Nothing was uploaded. Try again with a smaller file.",
         429: f"The limit is {RATE_LIMIT_PER_HOUR} reconciliations per hour from "
-             "one connection.",
+             f"one connection ({GLOBAL_RATE_LIMIT_PER_HOUR} across the whole "
+             "service). Nothing was stored.",
     }
     return _error_page(request, exc.status_code, titles.get(exc.status_code, "Something went wrong"),
                        body, hints.get(exc.status_code))
