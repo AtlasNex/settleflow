@@ -26,6 +26,12 @@ _TIME_SUFFIX = re.compile(r"^(.+?)[T ]\d{1,2}:\d{2}")
 
 
 def parse_date(value: str) -> date:
+    if not isinstance(value, str):
+        # A JSON number in a date position used to raise AttributeError from
+        # .strip() — not a ValueError, so it escaped every caller's guard
+        # (vuln-0003). A ragged CSV row (missing trailing cell -> None) hit the
+        # same path. Refuse the value the way this module promises.
+        raise ValueError(f"unparseable date: {value!r}")
     s = value.strip()
     m = _TIME_SUFFIX.match(s)
     if m:
@@ -96,6 +102,34 @@ def _validate_money(amount: Decimal, source: object) -> Decimal:
     return amount
 
 
+def _money(token: str) -> Decimal:
+    """Decimal rupees from a statement money token, bounded like every other entry point.
+
+    The flattened-TEXT and PDF parsers read a money token straight into Decimal()
+    and skipped _validate_money, so a token whose integer part is wider than the
+    decimal context (>= ~28 digits) produced an amount the exporters cannot
+    format: export_* -> format_money -> quantize() then raised InvalidOperation,
+    i.e. a crash in the caller rather than a refusal of the file — the same
+    failure mode _validate_money exists to stop for CSV cells and JSON amounts
+    (vuln-0008).
+    """
+    return _validate_money(Decimal(token.replace(",", "")), token)
+
+
+def _csv_rows(reader):
+    """Iterate a csv reader, turning csv.Error into the ValueError this module promises.
+
+    csv.Error derives from Exception, not ValueError, so it walked past every
+    `except ValueError` on the way out: one field longer than the csv module's
+    131072-byte default made a well-under-cap upload an unhandled error instead
+    of the refusal a bad file deserves (vuln-0003).
+    """
+    try:
+        yield from reader
+    except csv.Error as exc:
+        raise ValueError(f"malformed CSV: {exc}") from exc
+
+
 def parse_amount(value: str) -> Decimal:
     """Parse a money cell into Decimal RUPEES, or raise. Never guesses."""
     s = (value or "").strip()
@@ -126,7 +160,7 @@ def _txns_from_rows(
     per section instead of duplicating the loop.
     """
     txns: list[Txn] = []
-    for row in rows:
+    for row in _csv_rows(rows):
         utr = (row.get(utr_col) or "").strip() or None
         txns.append(
             Txn(
@@ -212,7 +246,7 @@ def load_bank_statement_csv(
     except csv.Error:
         dialect = csv.excel  # fall back to comma
 
-    rows = list(csv.reader(raw.splitlines(), dialect))
+    rows = list(_csv_rows(csv.reader(raw.splitlines(), dialect)))
 
     header_i = None
     for i, row in enumerate(rows):
@@ -298,7 +332,7 @@ def parse_drcr_statement(text: str) -> list[Txn]:
         # trailing money trio: amount Dr|Cr balance
         if (len(toks) >= 3 and toks[-2] in ("Dr", "Cr")
                 and _is_money(toks[-1]) and _is_money(toks[-3])):
-            amount = Decimal(toks[-3].replace(",", ""))
+            amount = _money(toks[-3])
             signed = -amount if toks[-2] == "Dr" else amount
             lead = toks[:-3]
             if lead:
@@ -428,8 +462,8 @@ def _parse_bank_block(block, prev_balance, narration_after):
     if len(amounts) < 2:
         return None
 
-    balance = Decimal(amounts[-1][0].replace(",", ""))
-    amount = Decimal(amounts[-2][0].replace(",", ""))
+    balance = _money(amounts[-1][0])
+    amount = _money(amounts[-2][0])
 
     narration = _block_narration(block, amounts, narration_after)
 
@@ -463,7 +497,7 @@ def parse_bank_text(text: str, *, narration_after: bool = False) -> list[Txn]:
     lines = [ln for ln in lines if ln]
 
     m = _OPENING_BAL.search(text)
-    prev_balance = Decimal(m.group(1).replace(",", "")) if m else None
+    prev_balance = _money(m.group(1)) if m else None
 
     blocks: list[list[str]] = []
     current: list[str] | None = None
@@ -502,7 +536,14 @@ def _paise(value) -> Decimal:
     A non-finite Decimal survives all the way into the export layer's quantize(),
     where it raises InvalidOperation mid-request — so bad input surfaces as a 500
     instead of the 400 the caller can act on.
+
+    A JSON boolean is refused, like _rupees already does: Decimal(True) is 1, so
+    an `"amount": true` field would otherwise be silently priced at ₹0.01 (and
+    false at ₹0.00) — coercion, not interpretation, at the money boundary
+    (vuln-0009; CONSTRAINTS.md #2).
     """
+    if isinstance(value, bool):
+        raise ValueError(f"unparseable amount: {value!r}")
     try:
         rupees = Decimal(value) / Decimal("100")
     except (InvalidOperation, TypeError, ValueError) as exc:
@@ -517,9 +558,32 @@ def _paise(value) -> Decimal:
 _IST = timezone(timedelta(hours=5, minutes=30))
 
 
+#: Upper bound for a settlement epoch, 2100-01-01 UTC. Far beyond any real
+#: settlement, and inside every platform's time_t, so it can never itself be
+#: the reason a timestamp is refused.
+_MAX_EPOCH = 4_102_444_800
+
+
 def _epoch_date(value) -> date:
-    """Convert a Unix epoch (UTC) to an IST calendar date."""
-    return datetime.fromtimestamp(int(value), tz=_IST).date()
+    """Convert a Unix epoch (UTC) to an IST calendar date, or raise ValueError.
+
+    The range is checked first because datetime.fromtimestamp raises
+    OverflowError/OSError outside the platform's time_t range, and neither is
+    a ValueError - an odd created_at escaped the parser as an unhandled error
+    instead of the refusal a wrong-shaped file deserves (vuln-0003).
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"unparseable timestamp: {value!r}")
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"unparseable timestamp: {value!r}") from exc
+    if not 0 <= seconds <= _MAX_EPOCH:
+        raise ValueError(f"timestamp out of range: {value!r}")
+    try:
+        return datetime.fromtimestamp(seconds, tz=_IST).date()
+    except (OverflowError, OSError, ValueError) as exc:
+        raise ValueError(f"timestamp out of range: {value!r}") from exc
 
 
 #: The two fields a settlement row cannot be built without. The documented schema
@@ -613,6 +677,17 @@ def parse_razorpay_recon(data: dict) -> list[ReconLine]:
         missing = [k for k in RAZORPAY_RECON_REQUIRED if k not in item]
         if missing:
             raise ValueError(f"recon line missing required keys: {missing}")
+        for key in ("entity_id", "type", "settlement_id"):
+            # settlement_id becomes a dict key and a sort key downstream
+            # (group_batches), so a JSON list/object raises an unhashable
+            # TypeError, and mixed str/int types raise in sorted() - AFTER this
+            # parser has returned success, i.e. outside any load-time guard
+            # (vuln-0003). Refuse non-strings where they are parsed.
+            if not isinstance(item[key], str):
+                raise ValueError(
+                    f"recon field {key!r} must be a string (got "
+                    f"{type(item[key]).__name__})"
+                )
         unknown = set(item) - RAZORPAY_RECON_KEYS - {"credit_type", "posted_at"}
         if unknown:
             raise ValueError(f"unknown recon fields {sorted(unknown)} — schema changed?")
@@ -914,7 +989,7 @@ def _recon_lines_from_rows(
     guessed sign silently reverses a reconciliation.
     """
     out: list[ReconLine] = []
-    for row in rows:
+    for row in _csv_rows(rows):
         fee = _money_or_zero(row.get(fee_col)) if fee_col else Decimal("0")
         tax = _money_or_zero(row.get(tax_col)) if tax_col else Decimal("0")
         if direction_col:

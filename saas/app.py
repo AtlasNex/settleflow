@@ -917,11 +917,14 @@ async def reconcile(
     # --- settlement side -------------------------------------------------
     try:
         settlements, recon_lines = _load_settlement_side(kind, settlement_raw)
-    except (UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError,
+            RecursionError) as exc:
         # ValueError covers json.JSONDecodeError (a subclass) and the parsers'
         # fail-closed refusals, whose own sentence is the most useful text we have;
-        # KeyError/TypeError cover a payload that is merely the wrong shape. Those
-        # are the CALLER's file, not our bug, so they are a 400 and not a 500.
+        # KeyError/TypeError cover a payload that is merely the wrong shape;
+        # RecursionError comes from json.loads on a deeply nested payload (~100KB
+        # of brackets) and cannot be translated inside the parsers (vuln-0003).
+        # Those are the CALLER's file, not our bug, so they are a 400 and not a 500.
         raise HTTPException(400, f"That settlement file could not be read: {exc}") from exc
 
     if not settlements and not recon_lines:
@@ -956,6 +959,8 @@ async def reconcile(
                 400, f"Column mapping failed on {exc}. Columns found: {', '.join(header)}."
             ) from exc
         except ValueError as exc:
+            # (csv.Error from an oversized field is translated to ValueError in
+            # the loaders, so it lands here too - vuln-0003.)
             raise HTTPException(
                 400,
                 f"A row in the bank statement could not be read: {exc}. Check that "

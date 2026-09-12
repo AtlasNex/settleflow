@@ -1332,9 +1332,16 @@ def test_exports_are_consistent_and_defuse_formulas():
     assert cells and cells[0][1] == "'" + evil, cells
     assert all(cell != evil for row in cells for cell in row), "an undefused cell survived"
 
-    # a hyphen-leading reference is ordinary data and must NOT be rewritten
+    # a hyphen-leading reference is a formula initiator like any other (unary
+    # minus): it must be neutralised. Assert on the PARSED cell, because a
+    # substring assertion is true for both the raw and the defused form and so
+    # enforced nothing (vuln-0005).
     ok = match([t("UTRX2", "100.00", 5, "-INST-2025-0142")], [t("UTRX2", "100.00", 5)])
-    assert "-INST-2025-0142" in export_tally_csv(ok)
+    hyphen_cells = [row for row in csv.reader(io.StringIO(export_tally_csv(ok)))][1:]
+    assert hyphen_cells and hyphen_cells[0][1] == "'-INST-2025-0142", hyphen_cells
+    # a genuinely negative AMOUNT stays numeric — only free text is defused
+    neg = match([t("UTRX3", "-100.00", 5)], [t("UTRX3", "-100.00", 5)])
+    assert ",-100.00," in export_tally_csv(neg).replace("\r\n", "\n")
 
 
 def test_cli_refuses_a_json_settlement_file():
@@ -1459,6 +1466,89 @@ def test_pick_client_ip_trusts_only_the_cloudflare_header():
     assert _pcip({}, "not-an-ip") == UNIDENTIFIED_CLIENT
     # a public peer with an invalid CCI still gets its own (single) identity
     assert _pcip({"cf-connecting-ip": "junk"}, "8.8.8.8") == "8.8.8.8"
+
+
+def test_strix_batch2_parsers_refuse_what_exporters_cannot_format():
+    """vuln-0008 + vuln-0007 + vuln-0009 + vuln-0003: the text/PDF/JSON money and
+    date entry points must refuse absurd values as ValueError, never accept-and-
+    crash-later, and never raise a non-ValueError type a caller cannot expect."""
+    from settleflow import load_csv, parse_bank_text
+    from settleflow.parsers import _epoch_date, _paise, _rupees
+
+    BIG = "9" * 40 + ".00"   # wider than the decimal context: quantize() would crash
+    # flattened-text path (PNB/DBS block parser)
+    text = ("Date Transaction Withdrawal Deposit Balance\n"
+            "01-05-2023 UPI/DR/123456789012 SOME MERCHANT 1,000.00 5,000.00\n"
+            f"02-05-2023 UPI/CR/123456789013 SALARY CREDIT {BIG} 9,000.00\n"
+            "Closing Balance 9,000.00\n")
+    try:
+        parse_bank_text(text, narration_after=True)
+        raise AssertionError("over-wide amount accepted by parse_bank_text")
+    except ValueError as exc:
+        assert "out of range" in str(exc), exc
+
+    # SBI netbanking path with NO year line: used to raise NameError (vuln-0007)
+    sbi = ("Account Statement\n"
+           "Txn Date Value Date Description Ref No./Cheque No. Debit Credit Balance\n"
+           "01 Jan SOME UPI PAYMENT TO MERCHANT 1234 1,000.00 5,000.00\n")
+    rows = parse_sbi_statement(sbi)          # must not raise; year falls back
+    assert len(rows) == 1
+    sbi_big = ("Account Statement\n"
+               "Txn Date Value Date Description Ref No./Cheque No. Debit Credit Balance\n"
+               f"01 Jan SOME PAYMENT {BIG} 5,000.00\n")
+    try:
+        parse_sbi_statement(sbi_big)
+        raise AssertionError("over-wide amount accepted by parse_sbi_statement")
+    except ValueError as exc:
+        assert "out of range" in str(exc), exc
+
+    # money boundary consistency (vuln-0009): bools refused by BOTH parsers,
+    # numerics unchanged
+    for fn in (_paise, _rupees):
+        for v in (True, False):
+            try:
+                fn(v)
+                raise AssertionError(f"{fn.__name__} accepted {v!r}")
+            except ValueError:
+                pass
+    assert _paise("100") == Decimal("1")
+
+    # date boundary (vuln-0003): a JSON number in a date position is a ValueError
+    from settleflow import parse_date
+    for bad in (20260901, None, 1.5):
+        try:
+            parse_date(bad)
+            raise AssertionError(f"parse_date accepted {bad!r}")
+        except ValueError:
+            pass
+    # epoch bound: OverflowError/OSError no longer escape _epoch_date
+    for bad in (1e30, 10 ** 18, -5, "not-a-number"):
+        try:
+            _epoch_date(bad)
+            raise AssertionError(f"_epoch_date accepted {bad!r}")
+        except ValueError:
+            pass
+    assert _epoch_date(0) == date(1970, 1, 1)          # epoch 0 stays legal
+    assert _epoch_date(1568176960) == date(2019, 9, 11)  # real value unchanged
+
+    # oversized CSV field: csv.Error must arrive as ValueError (vuln-0003)
+    d = Path(tmp_dir()) / "csverr"
+    d.mkdir(parents=True, exist_ok=True)
+    big = _write(d / "big.csv", "utr,amount,date\n" + "A" * 200000 + ",1.00,2026-09-01\n")
+    try:
+        load_csv(str(big), "utr", "amount", "date")
+        raise AssertionError("oversized csv field accepted")
+    except ValueError as exc:
+        assert "malformed CSV" in str(exc), exc
+
+    # recon identity fields: a JSON list settlement_id must be refused at parse
+    try:
+        parse_razorpay_recon({"items": [{
+            "entity_id": "e", "type": "debit", "settlement_id": ["x"],
+            "created_at": 1568176960}]})
+        raise AssertionError("unhashable settlement_id accepted")
+    except ValueError as exc:
+        assert "must be a string" in str(exc), exc
 
 
 def test_request_size_guard_only_refuses_a_declared_oversize():

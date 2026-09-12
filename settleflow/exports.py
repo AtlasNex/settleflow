@@ -46,14 +46,16 @@ def format_money(value: Decimal) -> str:
 _money = format_money
 
 
-#: A cell a spreadsheet would EVALUATE rather than display. Excel and Google Sheets
-#: treat a leading = + @ (or tab/CR) as the start of a formula even when the field
-#: is CSV-quoted, so a narration like "=HYPERLINK(""http://evil/x"",""click"")"
-#: becomes a live formula the moment the accountant opens the workpaper. Prefixing
-#: a single quote is the standard defusal: the text still reads correctly and stops
-#: being executable. `-` is deliberately NOT included — a reference or narration
-#: beginning with a hyphen is legal data, and quoting it would corrupt real values.
-_FORMULA_PREFIXES = ("=", "+", "@", "\t", "\r")
+#: A cell a spreadsheet would EVALUATE rather than display. Excel, Google Sheets
+#: and LibreOffice treat a leading = + - @ (or tab/CR) as the start of a formula
+#: even when the field is CSV-quoted — a leading hyphen is a unary-minus formula,
+#: exactly like '=' — so a narration like "=HYPERLINK(""http://evil/x"",""click"")"
+#: or a reference like -2+2+cmd|' /C calc'!A0 becomes a live formula the moment
+#: the accountant opens the workpaper. Prefixing a single quote is the standard
+#: defusal: the cell still READS the same and stops being executable. Only
+#: free-text cells pass through here — money goes via format_money() — so a
+#: genuine negative amount is never turned into text (vuln-0005).
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _cell(value: str | None) -> str:

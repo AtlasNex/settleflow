@@ -26,11 +26,12 @@ Explicitly NOT handled (raise rather than half-parse, D-7):
 from __future__ import annotations
 
 import re
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 from .models import Txn
-from .parsers import parse_date
+from .parsers import _money, parse_date
 
 _MONEY = re.compile(r"^\d[\d,]*\.\d{2}$")
 _YONO_DATE = re.compile(r"^\d{1,2}-\d{1,2}-\d{2,4}$")
@@ -100,7 +101,7 @@ def parse_sbi_credit_card(text: str) -> list[Txn]:
         m = row.match(ln)
         if not m:
             continue
-        amount = Decimal(m.group(3).replace(",", ""))
+        amount = _money(m.group(3))
         is_credit = amount < 0 or re.search(r"\bCR\.?$", ln, re.IGNORECASE) is not None
         magnitude = -amount if amount < 0 else amount
         txns.append(Txn(
@@ -177,8 +178,8 @@ def parse_sbi_netbanking(text: str) -> list[Txn]:
         if len(amts) < 2:
             i += 1
             continue
-        balance = Decimal(amts[-1].group(0).replace(",", ""))
-        amount = Decimal(amts[-2].group(0).replace(",", ""))
+        balance = _money(amts[-1].group(0))
+        amount = _money(amts[-2].group(0))
 
         desc = rest[:amts[-2].start()].strip()
         if tail:
@@ -243,9 +244,9 @@ def parse_sbi_statement(text: str) -> list[Txn]:
             return None
         narration = " ".join(cur_narration) or None
         if _is_money(credit):
-            amount = Decimal(credit.replace(",", ""))
+            amount = _money(credit)
         else:
-            amount = -Decimal(debit.replace(",", ""))
+            amount = -_money(debit)
         utr = None if _is_dash(refno) else refno
         txns.append(Txn(utr=utr, amount=amount, txn_date=cur_date, ref=narration))
         cur_date = None
