@@ -13,41 +13,56 @@ settlement-reconciliation engine: a zero-dependency MIT Python core plus a thin 
 `https://settleflow.atlasnex.com`. It matches gateway settlements against bank statements and
 produces the workpapers a finance team files (Tally CSV, GST worksheet, TDS 1035).
 
-**The four things left, in priority order:**
+**State change since the last cold-start: v0.7.4 IS DEPLOYED (2026-09-11, ATL-246, Sanjay
+authorised).** The four things left, in priority order:
 
-1. **DECIDE THE DEPLOY (Sanjay's call, blocked on him).** Seven commits of fixes are in the repo,
-   tested and pushed, and **inert** — the live box still runs pre-fix v0.7.3 with **165 runs** and
-   contains every defect the review found, including a deploy script that would overwrite the live
-   database on its next run. Recommended: `deploy → remediate ATL-242 → deploy again` (D-40).
-2. **Remediate the 12 Strix findings — ATL-242** (1 high, 5 medium, 5 low, 1 info). Start with
-   vuln-0010/0002 (rate-limit identity + bound the work derived from an upload), 0001/0011 (`/notify`
-   is unrated and unpruned), then 0005/0007/0009 (small correctness), then the rest.
-3. **Owner-gated items — ATL-218** (only Sanjay can do these): PyPI account + token; Proton SMTP creds
-   for workpaper email; Cloudflare zone AI-crawl toggle; real sample exports for Juspay/PhonePe/IDFC.
-4. **The real-money trial** — the only thing that actually decides the venture: run ONE real
-   reconciliation for one real CA/fintech, offline, and hand back the output. Nothing has ever met
-   real money. Rename to Conjunction (ATL-230) is deliberately deferred behind this.
+1. **Remediate the 12 Strix findings — ATL-242** (1 high, 5 medium, 5 low, 1 info), then deploy
+   again (D-40's `deploy → remediate → deploy` is mid-flight: deploy ✅ done at 0.7.4). Order:
+   vuln-0002 first (bound the work derived from one upload — the real remaining DoS: ~7 s stall,
+   ~881 MB peak, ~72 MB durable DB per in-limits 8.5 MB request), then 0001/0011 (`/notify` is
+   unrated and unpruned), then 0005/0007/0009, then the rest. Full detail + durable copy of every
+   write-up: `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/`.
+2. **The security gate needs a Nous Portal API key — owner-gated on Sanjay, one click.** He directed
+   "any free LLM from Nous, long context, smart" after CommandCode ran dry. **Already verified with
+   the portal OAuth JWT: `z-ai/glm-5.3` on `https://inference-api.nousresearch.com/v1` returns HTTP
+   200, `finish_reason=tool_calls`, correct tool args — exactly Strix's contract** (D-39-compatible:
+   non-thinking model). A 1-h JWT cannot live in CI and the refresh token rotates on use, so CI
+   needs the static key: Sanjay creates it at portal.nousresearch.com/api-docs → store in vault /
+   repo secret `NOUS_API_KEY` → flip `.github/workflows/security.yml` env to
+   `STRIX_LLM: openai/z-ai/glm-5.3`, `LLM_API_BASE: https://inference-api.nousresearch.com/v1`,
+   `LLM_API_KEY: ${{ secrets.NOUS_API_KEY }}` (same shape as the CommandCode wiring in `b14c87a`).
+   Cost honesty: the last `quick` scan was 85.5M tokens; on Nous "free" means billed to the
+   subscription, not unmetered. The first scan that completes WITH findings is the acceptance test
+   for the still-unproven exit-2 gate branch.
+3. **ATL-218 — owner-gated, only Sanjay:** PyPI account+token; Proton SMTP creds; Cloudflare
+   AI-crawl toggle; real Juspay/PhonePe/IDFC samples.
+4. **The real-money trial — the only thing that decides the venture:** run ONE real reconciliation
+   offline for one real CA/fintech and hand back the output. Nothing has ever met real money. The
+   Conjunction rename (ATL-230) is deliberately deferred behind it.
 
 ---
 
-## THE SINGLE MOST IMPORTANT OPEN QUESTION — ANSWERED 2026-09-11 (ATL-244)
+## WHAT SESSION 17 (2026-09-11, glm-5.3-flash) DID — the receipts
 
-**Can a caller supply `CF-Connecting-IP` through the Cloudflare tunnel?** → **No.** The Cloudflare
-edge 403s (error code 1000) any request carrying a client-supplied CCI before it reaches cloudflared;
-the origin sets it itself. Probed from outside AND at the origin with a header-echo listener over the
-real tunnel (evidence + repro: `../strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`).
-
-Consequences:
-- vuln-0010's HIGH chain is broken at its identity link **on the deployed topology** — Strix tested a
-  local instance with no Cloudflare in front. It closes again the moment the origin is ever exposed
-  directly, so deploys must keep the 127.0.0.1 bind + tunnel-only ingress.
-- **`X-Forwarded-For` IS caller-controlled at the origin**: the client's value passes through as the
-  FIRST hop, real IP appended (echo-proved). Live v0.7.3 keys its rate limit on first-hop XFF → the
-  bypass is LIVE today; the fix (`pick_client_ip`, CCI-only) exists only in the repo. Deploy urgency:
-  raised, with evidence, not just inertia.
-- The surviving real work: vuln-0002 per-request amplification (~7 s stall, ~72 MB durable DB per
-  in-limits upload) — unaffected by the probe — plus IPv6-natural CCI rotation, whose answer is the
-  same cost ceiling.
+- **ATL-244 (done): the CF-Connecting-IP question is ANSWERED — no.** Probed from outside AND at the
+  origin (header-echo listener on the VPS, tunnel ingress retargeted settleflow→:8097 for ~2 min via
+  the CF API, config backed up and restored verbatim, health re-verified). Any request carrying a
+  client-supplied CCI is **403'd by the Cloudflare edge (error code 1000)** before cloudflared; the
+  origin log saw zero of them. `X-Forwarded-For` IS forwarded with the caller's value as FIRST hop.
+  → vuln-0010's HIGH chain does not close from outside **on this topology** (it re-arms if the origin
+  is ever exposed directly — keep 127.0.0.1 bind + tunnel-only ingress as a binding invariant, D-41).
+  Evidence: `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`.
+- **ATL-246 (done): v0.7.4 deployed.** Version bump release commit `85a0f2f`; `bash scripts/deploy.sh`
+  (the run exited into the background and its stdout was swallowed — every claim below was verified
+  EXTERNALLY, do not trust a deploy's own output alone). `/health` → `version 0.7.4, runs 173`
+  (169 before; delta = canary traffic — runs never dropped, tripwire held). Origin grep: zero
+  `x-forwarded-for` in `/opt/settleflow/saas/app.py`; `pick_client_ip` + `cf-connecting-ip` present —
+  the live XFF bypass is CLOSED. Backup `/opt/settleflow-backups/20260911-142122.tar.gz`; rollback
+  `bash scripts/rollback.sh latest`. Watchdog canary exit 0 silent = pass. CI green on `85a0f2f`
+  (Security Scan still red on CommandCode credits only). Also: the SERVER's copy of deploy.sh was
+  pre-`7fc77ef` (DB-overwrite bug still armed there) — now replaced.
+- Commits this session: `c37fcdc` (probe docs + D-41), `85a0f2f` (release 0.7.4), `f36aae4` (session
+  log) + this file's own commit.
 
 ---
 
@@ -55,91 +70,81 @@ Consequences:
 
 - **Repo:** `E:/Sanjay Files/StartUp/open source/settleflow` (Windows, git-bash). Branch `master`.
   Public: `AtlasNex/settleflow`.
-- **Live:** `https://settleflow.atlasnex.com` — v0.7.3, 165 runs, retention 30 days.
+- **Live:** `https://settleflow.atlasnex.com` — **v0.7.4**, 173+ runs, retention 30 days.
 - **Board:** Multica project **SettleFlow** `1e5c2be2-9967-46b5-8958-4275b73b6ad5`, agent **Hermes PM**
   `a1a9bdd5-f9b8-4505-854a-a4f943a6b17f`. CLI: `multica`.
-  ATL-234/235/237/238 `in_review` (review + its remediation) · ATL-241 (plan) · **ATL-242 (Strix
-  findings, todo)** · ATL-218 `blocked` (owner-gated) · ATL-230 `todo` (rename).
-- **Review reports (OUTSIDE the repo — they are abuse write-ups and the repo is public):**
-  `E:/Sanjay Files/StartUp/open source/settleflow-review-2026-09-11-v2.md` (current, 234 lines)
-  and `...-v1.md` (superseded).
-- **CF-Connecting-IP / XFF probe evidence + repro (also outside the repo, it names the ingress):**
-  `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`.
-  Reads like a live finding; it does not contain the origin address.
-- **Strix findings, durable copy (the CI artifact expires in 30 days):**
-  `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/` — 19 files incl.
-  `vulnerabilities.json`, 12 per-finding `.md`, `penetration_test_report.md`, `run.json`, SARIF.
-- **Deploy:** `bash scripts/deploy.sh` (needs `SETTLEFLOW_HOST` from gitignored `scripts/.deploy.env`
-  — present). Rollback: `bash scripts/rollback.sh latest`. Both now exclude `*.db` and `.deploy.env`,
-  and the deploy asserts the live run count never drops.
+  ATL-244 done (probe) · ATL-246 done (deploy) · **ATL-242 todo (findings — the next work)** ·
+  ATL-234/235/237/238/241 in_review (closed loops from session 16) · ATL-218 blocked (owner-gated;
+  now includes the Nous Portal API key) · ATL-230 todo (rename, deferred).
+- **Review reports (OUTSIDE the repo — abuse write-ups, repo is public):**
+  `E:/Sanjay Files/StartUp/open source/settleflow-review-2026-09-11-v2.md` (current) / `-v1.md` (old).
+- **Strix findings + the CCI/XFF probe evidence, durable copies (CI artifacts expire):**
+  `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/` — 20 files incl.
+  `vulnerabilities.json`, 12 per-finding `.md`, `PROBE-cf-connecting-ip.md`, `run.json`, SARIF.
+- **Deploy:** `bash scripts/deploy.sh` (needs `SETTLEFLOW_HOST` from gitignored
+  `scripts/.deploy.env` — present). Rollback: `bash scripts/rollback.sh latest`. Excludes `*.db` and
+  `.deploy.env`; asserts the live run count never drops.
 - **Watchdog:** Hermes cron `34f4e54a27d8`, every 15 min, runs
   `C:/Users/sanja/AppData/Local/hermes/scripts/settleflow_canary.py`, state at
   `C:/Users/sanja/AppData/Local/hermes/state/settleflow-canary.log`.
-- **Scratch (uncommitted, outside the repo):** `C:/Users/sanja/.multica-tmp/` holds the probes
-  (`verify_hosted.py`, `cc_probe.py`, `verify_m3m4.py`), the test-insertion scripts, the commit
-  message files, and the issue bodies.
+- **Scratch (uncommitted, outside the repo):** `C:/Users/sanja/.multica-tmp/` — this session's
+  `cf_passthrough_probe.py`, `tunnel_cfg_backup.json` (verbatim live tunnel config), issue-body files.
 
 ---
 
-## STATE AT CLOSE (2026-09-11)
+## HOW TO START (the recorded verification way)
 
-- Repo clean at **`acc5275`**, pushed. **`hermes verify --skip-start` → `ok: true`**, bootstrap exit 0,
-  test exit 0, **all 74 checks passed**, port 8000 clear before and after.
-- Zero-dependency core verified (24 modules, all stdlib). Canary 5/5 on the live service.
-- CI green, EXCEPT: **the Security Scan currently fails because CommandCode is out of credits.**
-  `quick` is not cheap — one scan cost **85.5M tokens** (557 requests, 83.5M cached input, 779k
-  output) and exhausted the account. The gate behaves correctly (it fails loudly that the scan did
-  not run), but **the exit-2 path — fail-on-findings — is still unproven**, because no run has
-  completed *with* findings since `264c254` fixed it. The first run to do so is the proof.
-- Nothing was deployed. No background processes left by this session.
+```bash
+cd "E:/Sanjay Files/StartUp/open source/settleflow"
+git log --oneline -3 && git status --short          # expect clean at f36aae4+ (or later)
+python tests/test_matching.py                        # expect: all 74 checks passed
+curl -s https://settleflow.atlasnex.com/health       # expect version 0.7.4, runs >= 173
+gh run list --limit 3                                # CI green; Security Scan red ONLY on credits
 
-### What shipped this session (8 commits)
+# then verify state the recorded way (never a full verify):
+hermes verify --skip-start --json                    # expect ok:true; port 8000 clear before+after
 
-| Commit | What |
-|---|---|
-| `7fc77ef` | **deploy/rollback no longer ship `saas/*.db`** (would have wiped 165 runs) + a run-count tripwire |
-| `f38b4ac` | library/CLI: strict `parse_amount` (was 1000× wrong for `'Rs.100'`), fail-closed envelope validation, JSON-not-CSV detection, `csv.writer`, linear `match()` (8k dup-UTR rows 0.655s→0.033s), formula-injection defusing |
-| `7b82d50` | saas: rate-limit identity fix, whole-body size cap, **all six wired formats reachable**, exact decimal JSON money, honest copy |
-| `342e79d` | docs: seven different check-counts across eight files corrected; `ROLLBACK.md` rewritten (it said "no database, no deploy") |
-| `442dac4` | Starlette's own `HTTPException` now gets the branded page (it returned raw JSON) |
-| `b14c87a` | CI: Strix routed through CommandCode |
-| `264c254` | CI: **fail the build when Strix finds vulnerabilities** (it went green over 12 findings) |
-| `acc5275` | CI: GLM-5.3 — deepseek's thinking mode breaks Strix's client |
+# board:
+multica issue get ATL-242 --output json | head -40
+```
+
+Then start ATL-242: read `vuln-0002.md` first, fix, self-check, move down the board order. If the
+Nous key exists by then, wire it into `security.yml` and let the re-scan be the second deploy's gate.
 
 ---
 
 ## HARD PITFALLS (each of these has cost real time)
 
-1. **NEVER run a full `hermes verify` on this repo.** It hangs and orphans a process on port 8000
-   that answers `/health` 200 while `POST /reconcile` returns 500. Use `hermes verify --skip-start`.
-2. **Check port 8000 before and after any verify**, or a stale listener flatters the pass.
-3. **A green CI security run is not "no findings"** — read `strix_runs/*/vulnerabilities.json`.
-   Ours reported success while holding 12 findings (D-38).
-4. **Never commit the origin IP** (repo is public, origin is not in public DNS). The deploy host comes
-   from `scripts/.deploy.env`, which is gitignored and must never be committed or quoted.
-5. **`scripts/.deploy.env` and `saas/*.db` must never enter a deploy tarball** — that was the C-1
-   data-loss bug. The deploy script's tripwire catches it now; don't "simplify" the excludes away.
-6. **No `pytest` in this repo by design** (D-8). Tests are assert-based: `python tests/test_matching.py`.
-7. **Real vendor files must never be committed** — they carry a named merchant's real UTRs. Fixtures
-   are regenerated from the real header with invented values, each with a `NOTICE.md` (D-19/D-21).
-8. **`parse_amount` is strict on purpose.** `'Rs.100'` used to become `0.100` — a 1000× silent
-   understatement — and `NaN`/`Infinity`/`1e400` reached the exporters' `quantize()`. Do not relax it
-   without a specific real file that needs it.
-9. **Native Windows Python cannot read MSYS `/e/...` paths** — pass `E:/...` forward-slash paths.
-10. **The patch tool mangles quote-escaping on `deploy.sh`/`rollback.sh` remote blocks.** Edit those
-    via Python with explicit `chr(92)`/`chr(34)`, and verify with a stub `ssh` that prints the remote
-    command.
-11. **Cloudflare edge-caches `.csv`.** A removed route keeps serving until purged — that is why every
-    run response is `no-store` (D-30) and why run URLs are `noindex`.
-12. **Never kill Hermes-owned processes** (agent-stack rule): `Hermes.exe`, `hermes_cli.main serve`,
-    `gateway run`, `gee-mcp`. RAM cleanup means extra Cursor-spawned MCP copies only.
-13. **Strix model contract:** `LLM_API_BASE` (not `OPENAI_BASE_URL`) for a gateway; never a
-    thinking-mode model (reasoning_content round-trip 400s); a 403 `error code 1010` is Cloudflare
-    bot-blocking a bare client, not an auth failure (D-39).
-14. **A Strix `quick` scan cost 85.5M tokens and drained the CommandCode account.** Budget for it, and
-    treat "insufficient credits" as an owner-gated blocker, not a code failure — the run fails with
-    `run.json` status `failed` and `Fail unless the scan completed` fires correctly, so it reads like
-    a config bug when it is a billing one.
+1. **NEVER run a full `hermes verify` on this repo.** It hangs and orphans a process on port 8000.
+   Use `hermes verify --skip-start` and check port 8000 before and after.
+2. **No `pytest` in this repo by design** (D-8). Tests are assert-based: `python tests/test_matching.py`.
+3. **Never commit the origin IP** (repo is public). The deploy host comes from `scripts/.deploy.env`
+   (gitignored; never commit or quote it). `saas/*.db` must never enter a deploy tarball — the
+   tripwire now fails the deploy if the live run count ever drops; don't "simplify" the excludes.
+4. **A green CI security run is not "no findings"** — read `strix_runs/*/vulnerabilities.json` (D-38).
+   And a red one is not "findings" — CommandCode credits was the last cause. Read `run.json` status.
+5. **`scripts/canary.py` run DIRECTLY from the laptop FAILS by design** — it targets
+   `127.0.0.1:8093`, which exists only on the VPS. Use the watchdog wrapper
+   `C:/Users/sanja/AppData/Local/hermes/scripts/settleflow_canary.py` (public URL; silent + exit 0
+   = pass).
+6. **A long background command's stdout can be swallowed** (deploy.sh exited 0 with empty output
+   after an incoming message moved it to background). Verify state-changing scripts externally:
+   `/health` version+runs, origin file greps, backups dir, canary — never the script's own report.
+7. **Cloudflare edge-caches `.csv`** — a removed route keeps serving until purged (D-30, no-store).
+8. **Strix model contract (D-39):** `LLM_API_BASE` (not `OPENAI_BASE_URL`); never a thinking-mode
+   model (`reasoning_content` round-trip 400s); a 403 `error code 1010` is Cloudflare bot-blocking a
+   bare client, not an auth failure. Verified-on-Nous substitutes if GLM-5.3 misbehaves:
+   `moonshotai/kimi-k3` answered 200 (but showed no tool_call in a one-shot probe — re-verify
+   tool-calling before trusting it); `qwen/qwen3.8-max-0902` 400'd.
+9. **The Nous portal OAuth refresh token rotates on use** — never refresh it from two processes
+   (CI + laptop racing it breaks the laptop's auth). Static `NOUS_API_KEY` is the CI-safe credential.
+10. **Real vendor files must never be committed** (named merchant UTRs) — fixtures with NOTICE.md only.
+11. **`parse_amount` is strict on purpose** (`'Rs.100'` used to become `0.100`). Do not relax it
+    without a specific real file that needs it.
+12. **Native Windows Python cannot read MSYS `/e/...` paths** — pass `E:/...` forward-slash paths.
+13. **The patch tool mangles quote-escaping on `deploy.sh`/`rollback.sh` remote blocks** — edit those
+    via Python with explicit `chr(92)`/`chr(34)`, verify with a stub `ssh`.
+14. **Never kill Hermes-owned processes** (agent-stack rule). **Never `rm -rf`** without a verified path.
 
 ---
 
@@ -151,31 +156,15 @@ Consequences:
 - Ponytail lazy-senior mode: smallest working diff, reuse before writing, deletion over addition,
   one runnable check behind any non-trivial logic.
 - Honesty taxonomy in every closeout: **DONE vs DEFERRED vs ABORTED vs SKIPPED**, never inflate.
-- Currency as **USD (INR) both**. Never `rm -rf`; verified-path deletes; docker via compose.
+- Currency as **USD (INR) both**.
 - Sanjay's working style: answers first, execute in-session (cron is backup, never the doer), build
   only on an explicit go, and challenge completion claims as well as tech rejections.
 
 ---
 
-## HOW TO START
+## THE TWO QUESTIONS FOR SANJAY THIS TIME
 
-```bash
-cd "E:/Sanjay Files/StartUp/open source/settleflow"
-git log --oneline -3 && git status --short          # expect clean at d7288ba+ (or later)
-python tests/test_matching.py                        # expect: all 74 checks passed
-curl -s https://settleflow.atlasnex.com/health       # expect runs >= 165, version 0.7.3
-gh run list --workflow=security.yml --limit 3        # known: failing on CommandCode credits, not code
-
-# then verify state the recorded way (never a full verify):
-hermes verify --skip-start --json
-
-# check the board, then ask Sanjay the questions that actually block progress:
-multica issue get ATL-242 --output json | head -40
-multica issue get ATL-218 --output json | head -40
-```
-
-**Ask Sanjay two things first:**
-1. *Deploy now, or hold?* Everything else is queued behind that answer, and the fixes protect nothing
-   until `bash scripts/deploy.sh` runs.
-2. *Fund CommandCode (or point Strix at another funded provider)?* The security gate cannot run until
-   that is resolved, and a `quick` scan costs ~85M tokens.
+1. **The Nous Portal API key** (one click): create at portal.nousresearch.com/api-docs, give it to
+   Hermes — then the gate can run and ATL-242's re-scan has a judge. Budget the ~85M-token scan.
+2. **When the ATL-242 fixes land:** deploy 0.7.5 immediately after (the sequence is already
+   authorised in shape; say go again anyway).

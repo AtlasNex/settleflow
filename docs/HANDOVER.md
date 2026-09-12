@@ -23,22 +23,34 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 
 ### ⚠️ READ THIS FIRST — where the session ended
 
-**Nothing is deployed. The live service still runs the pre-fix v0.7.3 (165 runs).** Eight commits sit
-in the repo, tested, pushed, CI green — and inert. The deployed copy still contains every defect the
-review found, including the deploy script that would overwrite the live database on its next run.
+**v0.7.4 IS DEPLOYED and live (2026-09-11, session 17, ATL-246).** `https://settleflow.atlasnex.com/health`
+→ `version 0.7.4`, runs 173+. The live XFF rate-limit bypass is CLOSED (`pick_client_ip` CCI-only is
+on the box), the DB-overwrite deploy bug is off the server, and the run-count tripwire is armed.
+Rollback: `bash scripts/rollback.sh latest` (backup `20260911-142122`).
 
-**One decision is outstanding and it is Sanjay's:** whether to deploy. Recommended sequence is
-**deploy → remediate the Strix findings (ATL-242) → deploy again**, because the deploy target
-(`b14c87a`/`acc5275`) is a strict improvement over live but is not the end state.
-
-**One premise was unproven — now SETTLED (ATL-244, probe from outside + origin-side header echo):** a
-caller CANNOT supply `CF-Connecting-IP` through the Cloudflare tunnel; the edge 403s any request that
-carries one (error 1000). So vuln-0010's HIGH chain is broken on the deployed topology — but only as
-long as the origin keeps its 127.0.0.1 bind and tunnel-only ingress, so deploys must not regress that.
-`X-Forwarded-For` IS caller-controlled at the origin (client value passes through as first hop), and
-live v0.7.3 keys its rate limit on it — the bypass is live today; the fix (`pick_client_ip`,
-CCI-only) is in the repo. Evidence + repro:
+**The CF-Connecting-IP premise is SETTLED (ATL-244, D-41):** a caller CANNOT supply CCI through the
+tunnel — the edge 403s (error 1000) any request carrying one, before it reaches cloudflared.
+vuln-0010's HIGH chain does not close from outside **on this topology**; it re-arms the moment the
+origin is ever exposed directly, so deploys must keep the 127.0.0.1 bind + tunnel-only ingress.
+`X-Forwarded-For` IS caller-controlled at the origin (client value = first hop, echo-proved) — which
+is exactly why the old live build was bypassable and the deploy mattered. Evidence:
 `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`.
+
+**Next unit of work (D-40, mid-flight): remediate ATL-242, then deploy again.** Order on the board:
+vuln-0002 (bound the work derived from an upload — the real remaining DoS), 0001/0011 (/notify is
+unrated and unpruned), 0005/0007/0009, the rest.
+
+**The security gate is still unfunded, but the provider is chosen and half-proven:** Sanjay directed
+"any free LLM from Nous, long context, smart". Verified with the portal OAuth JWT:
+`z-ai/glm-5.3` on `https://inference-api.nousresearch.com/v1` returns HTTP 200 with
+`finish_reason=tool_calls` — Strix's contract (D-39-compatible). What is missing is a **durable Nous
+Portal API key** (the OAuth JWT expires in 1 h and the refresh token rotates — CI cannot use it;
+`NOUS_API_KEY` is the supported static credential). Owner-gated on Sanjay:
+create the key at portal.nousresearch.com/api-docs → then flip `security.yml` to
+`STRIX_LLM: openai/z-ai/glm-5.3`, `LLM_API_BASE: https://inference-api.nousresearch.com/v1`,
+`LLM_API_KEY: ${{ secrets.NOUS_API_KEY }}`. A `quick` scan cost 85.5M tokens on CommandCode; on Nous
+"free" means billed to the subscription, not unmetered — budget the first scan as the acceptance test
+for the still-unproven exit-2 path.
 
 **Strix is the new verification gate, but it is currently OUT OF CREDITS.** It found 12 issues
 (1 high, 5 medium) that our own 74-check self-check and the manual review both missed — including a
