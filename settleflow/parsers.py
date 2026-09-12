@@ -431,6 +431,15 @@ def _block_narration(block: list[str], amounts: list[tuple], narration_after: bo
                 parts.append(ln.strip())
     else:
         first_line = amounts[0][1]
+        # One pass to index the money tokens by line. Filtering the whole token
+        # list once PER LINE made narration reassembly quadratic in block size,
+        # and a crafted single-block statement (no second date line) kept the
+        # whole file in one block: 16k lines already cost 14.3s, projecting to
+        # ~40 minutes at the 10MB cap (vuln-0006). Ordering within a line is
+        # preserved, so line_amts[0] is the same token the filter returned.
+        by_line: dict[int, list] = {}
+        for a in amounts:
+            by_line.setdefault(a[1], []).append(a)
         for i, ln in enumerate(block):
             if i == 0:
                 date_len = len(block[0].split()[0])
@@ -439,7 +448,7 @@ def _block_narration(block: list[str], amounts: list[tuple], narration_after: bo
                 else:
                     seg = ln[date_len:]
             else:
-                line_amts = [a for a in amounts if a[1] == i]
+                line_amts = by_line.get(i)
                 seg = ln[:line_amts[0][2]] if line_amts else ln
             seg = seg.strip()
             if seg:

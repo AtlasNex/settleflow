@@ -1468,6 +1468,29 @@ def test_pick_client_ip_trusts_only_the_cloudflare_header():
     assert _pcip({"cf-connecting-ip": "junk"}, "8.8.8.8") == "8.8.8.8"
 
 
+def test_bank_text_narration_is_linear_in_block_size():
+    # vuln-0006: a crafted single-block DBS-layout statement kept the whole file
+    # in one transaction block, and the narration reassembly filtered the money
+    # token list once per line — quadratic. 16k lines measured 14.3s before the
+    # fix; the linear version is far under this deliberately loose bound.
+    from settleflow import parse_bank_text
+
+    n = 16000
+    lines = ["Date Transaction Reference Debit Credit Balance",
+             "01-05-2023 UPI/DR/123456789012 OPENING 10.00 100.00"]
+    lines += [f"CONT LINE {i} SOME NARRATION 1,0{i % 10}.00 2,0{i % 10}.00"
+              for i in range(n)]
+    text = "\n".join(lines) + "\n"
+
+    started = time.monotonic()
+    parse_bank_text(text)  # DBS shape: narration BEFORE the amount
+    elapsed = time.monotonic() - started
+    assert elapsed < 5.0, (
+        f"parse_bank_text took {elapsed:.1f}s for a single {n}-line block — the "
+        "quadratic narration rescan is back (it should be linear)"
+    )
+
+
 def test_strix_batch2_parsers_refuse_what_exporters_cannot_format():
     """vuln-0008 + vuln-0007 + vuln-0009 + vuln-0003: the text/PDF/JSON money and
     date entry points must refuse absurd values as ValueError, never accept-and-

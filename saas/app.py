@@ -103,6 +103,20 @@ RETENTION_DAYS = int(os.environ.get("SETTLEFLOW_RETENTION_DAYS", "30"))
 #: Correct for a single-instance service; if this ever runs multi-worker, move the
 #: counter to sqlite (same table, one more column) rather than reaching for Redis.
 RATE_LIMIT_PER_HOUR = int(os.environ.get("SETTLEFLOW_RATE_LIMIT_PER_HOUR", "60"))
+#: Ceiling on rows one upload may carry. The 10MB cap bounds the INPUT bytes,
+#: not the work derived from it: a 250,000-row / 8MB statement allocated ~900MB
+#: and persisted ~72MB per request (Strix vuln-0004). 200,000 rows is ~30x the
+#: largest real monthly CA statement this tool has seen, and a JSON settlement
+#: payload cannot exceed ~190,000 items within the same 10MB cap (minimum item
+#: ~55 bytes), so one line-count guard bounds both sides.
+MAX_STATEMENT_ROWS = int(os.environ.get("SETTLEFLOW_MAX_STATEMENT_ROWS", "200000"))
+
+#: How many reconciliations may run at once. The per-request peak is hundreds of
+#: MB; the box is not. Extra requests are refused (429) rather than queued, so a
+#: flood degrades into rejection instead of memory exhaustion (vuln-0004).
+MAX_CONCURRENT_RUNS = int(os.environ.get("SETTLEFLOW_MAX_CONCURRENT_RUNS", "2"))
+_work_slots = threading.Semaphore(MAX_CONCURRENT_RUNS)
+
 #: Identity-independent ceiling on /reconcile. The per-identity window keys on
 #: CF-Connecting-IP, so a caller that can choose that header mints a fresh bucket
 #: per request; this window counts every accepted request, so the total rate stays
@@ -887,7 +901,7 @@ def _resolve_columns(
 
 
 @app.post("/reconcile")
-async def reconcile(
+def reconcile(
     request: Request,
     settlement_file: UploadFile = File(...),
     bank_file: UploadFile = File(...),
@@ -896,10 +910,38 @@ async def reconcile(
     bank_amount_col: str = Form(""),
     bank_date_col: str = Form(""),
 ):
-    """Reconcile, store the run, and hand back the owner's private URL."""
+    """Reconcile, store the run, and hand back the owner's private URL.
+
+    A synchronous handler on purpose: FastAPI runs the whole request — multipart
+    spooling included — in the worker thread pool, so the parse/match/export
+    work no longer monopolises the event loop and every other request (the
+    health check included) is answered while a reconciliation runs (vuln-0004).
+    The explicit semaphore bounds how much of that heavy work runs CONCURRENTLY
+    — unbounded threads would just parallelise the ~900MB peaks — and the
+    derived-work cap inside bounds what one request may cost at all.
+    """
     if not _rate_ok(_client_ip(request)):
         raise HTTPException(429, "Too many reconciliations from this connection.")
+    if not _work_slots.acquire(blocking=False):
+        raise HTTPException(429, "The service is busy reconciling; try again in a moment.")
+    try:
+        return _reconcile_impl(
+            request, settlement_file, bank_file, settlement_kind,
+            bank_utr_col, bank_amount_col, bank_date_col)
+    finally:
+        _work_slots.release()
 
+
+def _reconcile_impl(
+    request: Request,
+    settlement_file: UploadFile,
+    bank_file: UploadFile,
+    settlement_kind: str,
+    bank_utr_col: str,
+    bank_amount_col: str,
+    bank_date_col: str,
+):
+    """The reconciliation itself; runs under the caller/slot guards in reconcile()."""
     kind = (settlement_kind or "").strip()
     if kind not in SETTLEMENT_KINDS:
         raise HTTPException(
@@ -913,6 +955,22 @@ async def reconcile(
 
     settlement_raw = _read_capped(settlement_file, MAX_UPLOAD_BYTES)
     bank_raw = _read_capped(bank_file, MAX_UPLOAD_BYTES)
+
+    # Bound the WORK derived from an upload, not just its bytes: a 250k-row /
+    # 8MB statement sits inside every advertised limit yet allocated ~900MB and
+    # persisted ~72MB (vuln-0004). A raw line count is an upper bound for CSV
+    # rows, and a compact JSON payload cannot exceed bytes/50 ≈ 200k items under
+    # the same 10MB cap. Pretty-printed 200k-line JSON is refused loudly with
+    # the reason in the message — never silently coerced (CONSTRAINTS #2).
+    for raw, label in ((settlement_raw, "settlement"), (bank_raw, "bank statement")):
+        if raw.count(b"\n") > MAX_STATEMENT_ROWS:
+            raise HTTPException(
+                400,
+                f"The {label} file has more than {MAX_STATEMENT_ROWS:,} lines; "
+                "this service reconciles statements in batches. Split the period "
+                "or export a compact (single-line) JSON and try again. Nothing "
+                "was stored.",
+            )
 
     # --- settlement side -------------------------------------------------
     try:
