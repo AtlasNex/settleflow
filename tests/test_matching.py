@@ -1574,6 +1574,68 @@ def test_strix_batch2_parsers_refuse_what_exporters_cannot_format():
         assert "must be a string" in str(exc), exc
 
 
+def test_pdf_layer_bounds_untrusted_documents():
+    # vuln-0012: a PDF is a compressed container — file size does not bound the
+    # work. Page count, decoded stream size and accumulated text are bounded in
+    # the text layer; the OCR layer adds a pixel ceiling computed BEFORE any
+    # rasterisation, per-page temp-dir release, and a tesseract timeout.
+    try:
+        import pymupdf
+    except ImportError:
+        return
+    from settleflow import PdfResourceLimitError, extract_pdf_text
+
+    d = Path(tmp_dir()) / "pdfbounds"
+    d.mkdir(parents=True, exist_ok=True)
+
+    # (a) page count: 51 pages -> refused, a 2-page doc -> fine
+    many = d / "many.pdf"
+    doc = pymupdf.open()
+    for i in range(51):
+        doc.new_page().insert_text((72, 72), f"page {i}")
+    doc.save(str(many)); doc.close()
+    try:
+        extract_pdf_text(str(many))
+        raise AssertionError("51-page PDF accepted")
+    except PdfResourceLimitError as exc:
+        assert "51 pages" in str(exc), exc
+    few = d / "few.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Date Transaction Reference Balance")
+    doc.new_page().insert_text((72, 72), "second page 100.00")
+    doc.save(str(few)); doc.close()
+    assert "Transaction Reference" in extract_pdf_text(str(few))
+
+    # (b) OCR raster bound: a 2000pt square page at 300dpi is ~69M pixels ->
+    # refused BEFORE get_pixmap; a normal page passes the guard.
+    try:
+        from settleflow.ocr import OcrUnavailableError, ocr_pdf_text
+    except ImportError:
+        return
+    huge = d / "huge.pdf"
+    doc = pymupdf.open()
+    doc.new_page(width=2000, height=2000).insert_text((72, 72), "BIG")
+    doc.save(str(huge)); doc.close()
+    try:
+        ocr_pdf_text(str(huge), dpi=300)
+        raise AssertionError("69-megapixel page rasterised without refusal")
+    except OcrUnavailableError:
+        return                      # CI box without tesseract: guard untestable
+    except PdfResourceLimitError as exc:
+        assert "pixels" in str(exc), exc
+    small = d / "small.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "SOME STATEMENT TEXT")
+    doc.save(str(small)); doc.close()
+    try:
+        ocr_pdf_text(str(small), dpi=150)
+    except PdfResourceLimitError as exc:
+        raise AssertionError(f"bounds misfired on a normal page: {exc}")
+    except ValueError:
+        pass    # OcrError (no text recovered at this dpi) is acceptable here;
+                # the point is the resource guard did not misfire.
+
+
 def test_request_size_guard_only_refuses_a_declared_oversize():
     # The 10MB file cap bounded the two FILES the app parses but not the request:
     # extra multipart parts rode through (a 210MB request was accepted with a 303).

@@ -51,6 +51,39 @@ class PdfLayoutError(ValueError):
     """The PDF's statement layout is recognised but not yet supported."""
 
 
+class PdfResourceLimitError(ValueError):
+    """The document exceeds a documented bound for the PDF/OCR layer.
+
+    Derives from ValueError so the CLI's existing handler turns it into a clean
+    message with exit status 2 (vuln-0012 remediation #6).
+    """
+
+
+#: Bounds for untrusted PDFs (vuln-0012; DECISIONS D-42). A PDF is a compressed
+#: container, so its file size does NOT limit the work it can force: Strix drove
+#: 125 s CPU and 297 MB RSS from a 50 KB 100-page file, and 455 MB from a 52 KB
+#: single page via its author-chosen MediaBox at 300 DPI. A real statement is
+#: one dense page; these ceilings are ~100x that.
+PDF_MAX_PAGES = 50
+PDF_MAX_PAGE_STREAM_BYTES = 2 * 1024 * 1024
+PDF_MAX_TEXT_CHARS = 2_000_000
+#: Raster ceiling per page at the requested DPI: pixels are what both the
+#: pixmap and Tesseract cost against. 300 dpi on A4 is ~1.16 MP; 40 MP covers
+#: any legitimate scan setting with an order of magnitude of slack.
+OCR_MAX_PIXELS = 40_000_000
+OCR_TIMEOUT_SECONDS = 120
+
+
+def _page_stream_bytes(page) -> int:
+    """DECODED size of a page's content streams — what parsing costs against.
+
+    The stored (compressed) length must not be trusted as a bound: a zip-bomb
+    style stream is tiny on disk and huge here. read_contents() returns the
+    concatenation of the page's decoded streams.
+    """
+    return len(page.read_contents())
+
+
 def _is_money(tok: str) -> bool:
     return bool(_MONEY.match(tok))
 
@@ -315,16 +348,42 @@ def extract_pdf_text(path: str | Path) -> str:
                 f"{Path(path).name} is password-protected; decrypt it (or export "
                 "an unlocked copy) before parsing"
             )
-        text = "\n".join(page.get_text() for page in doc)
+        # Bound the WORK, not the file size (vuln-0012): a compressed container
+        # can promise little and cost a lot. Checks run BEFORE any page text is
+        # parsed, and the character total accumulates per page.
+        if doc.page_count > PDF_MAX_PAGES:
+            raise PdfResourceLimitError(
+                f"{Path(path).name}: {doc.page_count} pages exceeds the "
+                f"{PDF_MAX_PAGES}-page limit for this layer"
+            )
+        parts: list[str] = []
+        total_chars = 0
+        for i, page in enumerate(doc):
+            stream = _page_stream_bytes(page)
+            if stream > PDF_MAX_PAGE_STREAM_BYTES:
+                raise PdfResourceLimitError(
+                    f"{Path(path).name}: page {i + 1} has {stream:,} decoded "
+                    f"content-stream bytes, over the {PDF_MAX_PAGE_STREAM_BYTES:,} "
+                    "limit for this layer"
+                )
+            text = page.get_text()
+            total_chars += len(text)
+            if total_chars > PDF_MAX_TEXT_CHARS:
+                raise PdfResourceLimitError(
+                    f"{Path(path).name}: extracted text exceeds "
+                    f"{PDF_MAX_TEXT_CHARS:,} characters"
+                )
+            parts.append(text)
+        joined = "\n".join(parts)
     finally:
         doc.close()
 
-    if not text.strip():
+    if not joined.strip():
         raise PdfScannedError(
             f"{Path(path).name} has no text layer (scanned image). OCR is a "
             "separate, not-yet-built layer — see docs/FEATURE.md"
         )
-    return text
+    return joined
 
 
 def parse_sbi_pdf(path: str | Path, *, ocr: bool = False) -> list[Txn]:

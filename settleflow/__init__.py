@@ -50,6 +50,7 @@ from .exceptions import Exception, build_llm_prompt, classify, triage_exceptions
 from .pdf import (
     PdfEncryptedError,
     PdfLayoutError,
+    PdfResourceLimitError,
     PdfScannedError,
     extract_pdf_text,
     parse_sbi_credit_card,
@@ -132,6 +133,7 @@ __all__ = [
     "triage_exceptions",
     "PdfEncryptedError",
     "PdfLayoutError",
+    "PdfResourceLimitError",
     "PdfScannedError",
     "extract_pdf_text",
     "parse_sbi_pdf",

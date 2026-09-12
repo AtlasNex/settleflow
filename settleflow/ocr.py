@@ -54,15 +54,32 @@ def ocr_pdf_text(path: str | Path, *, dpi: int = 300, psm: int = 6) -> str:
     """Rasterise each page and OCR it with Tesseract into a text layer.
 
     Raises `OcrUnavailableError` if Tesseract isn't installed, `ValueError` for a
-    non-PDF file, `PdfEncryptedError` for a password-locked file, and `OcrError`
-    if no text could be recovered. Returns the text per page, in page order.
+    non-PDF file, `PdfEncryptedError` for a password-locked file,
+    `PdfResourceLimitError` for a document over a documented bound, and
+    `OcrError` if no text could be recovered. Returns the text per page, in page
+    order.
+
+    Work bounds (vuln-0012): page count, DECODED content-stream size, and
+    accumulated characters are bounded like the text layer; the raster is
+    bounded by pixel count (a page's MediaBox is chosen by the file's author,
+    so it is never trusted as a size), one page image exists at a time, and
+    Tesseract gets a timeout that arrives as this layer's own error type.
+    Residual for untrusted files: a bound on a single page's parse cost cannot
+    be expressed inside the process — run this layer under an external memory
+    and CPU limit (container MemoryLimit, systemd MemoryMax, or a child
+    process with resource.setrlimit).
     """
-    from .pdf import PdfEncryptedError
+    from .pdf import (
+        OCR_MAX_PIXELS, OCR_TIMEOUT_SECONDS,
+        PDF_MAX_PAGE_STREAM_BYTES, PDF_MAX_PAGES, PDF_MAX_TEXT_CHARS,
+        PdfEncryptedError, PdfResourceLimitError,
+    )
 
     import pymupdf
 
     tess = _tesseract_binary()
     doc = pymupdf.open(str(path))
+    pages: list[str] = []
     try:
         if not doc.is_pdf:
             raise ValueError(
@@ -72,18 +89,55 @@ def ocr_pdf_text(path: str | Path, *, dpi: int = 300, psm: int = 6) -> str:
             raise PdfEncryptedError(
                 f"{Path(path).name} is password-protected; decrypt it first"
             )
-
-        pages: list[str] = []
-        with tempfile.TemporaryDirectory() as td:
-            for i, page in enumerate(doc):
+        if doc.page_count > PDF_MAX_PAGES:
+            raise PdfResourceLimitError(
+                f"{Path(path).name}: {doc.page_count} pages exceeds the "
+                f"{PDF_MAX_PAGES}-page limit for this layer"
+            )
+        total_chars = 0
+        for i, page in enumerate(doc):
+            stream = len(page.read_contents())
+            if stream > PDF_MAX_PAGE_STREAM_BYTES:
+                raise PdfResourceLimitError(
+                    f"{Path(path).name}: page {i + 1} has {stream:,} decoded "
+                    f"content-stream bytes, over the {PDF_MAX_PAGE_STREAM_BYTES:,} "
+                    "limit for this layer"
+                )
+            # The MediaBox is author-chosen: compute the pixels this page would
+            # rasterise to at the requested DPI and refuse BEFORE allocating.
+            w_pt, h_pt = page.rect.width, page.rect.height
+            pixels = (max(w_pt, 0) * dpi / 72.0) * (max(h_pt, 0) * dpi / 72.0)
+            if pixels > OCR_MAX_PIXELS:
+                raise PdfResourceLimitError(
+                    f"{Path(path).name}: page {i + 1} would rasterise to "
+                    f"{pixels:,.0f} pixels at {dpi} DPI, over the "
+                    f"{OCR_MAX_PIXELS:,} limit for this layer"
+                )
+            # One page's PNG exists at a time (removing what .ocr_pdf_text did
+            # before: a whole document's rasters accumulated in one directory).
+            with tempfile.TemporaryDirectory() as td:
                 png = Path(td) / f"p{i}.png"
                 page.get_pixmap(dpi=dpi).save(str(png))
-                res = subprocess.run(
-                    [tess, str(png), "stdout", "--psm", str(psm), "-l", "eng"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                )
-                if res.returncode == 0 and res.stdout.strip():
-                    pages.append(res.stdout)
+                try:
+                    res = subprocess.run(
+                        [tess, str(png), "stdout", "--psm", str(psm), "-l", "eng"],
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=OCR_TIMEOUT_SECONDS,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise PdfResourceLimitError(
+                        f"{Path(path).name}: page {i + 1} OCR exceeded "
+                        f"{OCR_TIMEOUT_SECONDS}s (a huge or degenerate page); "
+                        "refusing the document"
+                    ) from exc
+            if res.returncode == 0 and res.stdout.strip():
+                total_chars += len(res.stdout)
+                if total_chars > PDF_MAX_TEXT_CHARS:
+                    raise PdfResourceLimitError(
+                        f"{Path(path).name}: OCR text exceeds "
+                        f"{PDF_MAX_TEXT_CHARS:,} characters"
+                    )
+                pages.append(res.stdout)
     finally:
         doc.close()
 
