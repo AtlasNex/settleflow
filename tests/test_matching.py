@@ -837,8 +837,18 @@ def test_saas_guess_columns_returns_none_rather_than_guessing():
 def test_saas_email_validation_is_strict_at_the_boundary():
     assert valid_email("  Sanjay@AtlasNex.com ") == "sanjay@atlasnex.com"
     for bad in ("nope", "a@b", "@b.co", "a@.co", "", "   ", "a b@c.co",
-                ("x" * 260) + "@b.co"):
+                ("x" * 260) + "@b.co",
+                # vuln-0011: the value lands in To and smtplib derives the SMTP
+                # envelope with getaddresses, which splits on commas — anything
+                # that does not round-trip as EXACTLY ONE mailbox is rejected.
+                "buyer@x.com,root", ",root", "buyer,x@example.com",
+                "<a@b.com>", "a@b.com(comment)", 'g:a@b.com,evil;'):
         assert valid_email(bad) is None, bad
+    # the realistic shapes must keep passing (Gate 3 of the Strix fix verify)
+    for good in ("sanjay@atlasnex.com", "a.b+c@sub.example.co.in",
+                 "user_name@example.co.in", "x9@y-z.com",
+                 "first.last@mail.example.org", "ravi.kumar+settleflow@razorpay.com"):
+        assert valid_email(good) == good, good
 
 
 def test_saas_md_to_html_escapes_before_converting():

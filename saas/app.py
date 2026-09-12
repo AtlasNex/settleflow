@@ -376,11 +376,16 @@ def _prune(conn: sqlite3.Connection | None = None) -> int:
     Runs on startup and before every new run, so the window holds even if the
     service is never restarted. Not a background thread: a service that must be
     up to delete data will eventually stop deleting data.
+
+    `leads` is pruned alongside `runs`: the privacy page advertises the 30-day
+    window, and without this the table grew forever (verified: 10,000 rows in
+    25s via the unthrottled notify route, none ever deleted).
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
     own = conn is None
     c = conn or _conn()
     try:
+        c.execute("DELETE FROM leads WHERE created_at < ?", (cutoff,))
         cur = c.execute("DELETE FROM runs WHERE created_at < ?", (cutoff,))
         removed = cur.rowcount or 0
         if own:
@@ -519,7 +524,7 @@ def _http_error(request: Request, exc: HTTPException) -> HTMLResponse:
         404: "If you came from a link to a run, that run may have expired — runs "
              f"are deleted after {RETENTION_DAYS} days.",
         413: "Nothing was uploaded. Try again with a smaller file.",
-        429: f"The limit is {RATE_LIMIT_PER_HOUR} reconciliations per hour from "
+        429: f"The limit is {RATE_LIMIT_PER_HOUR} actions per hour from "
              f"one connection ({GLOBAL_RATE_LIMIT_PER_HOUR} across the whole "
              "service). Nothing was stored.",
     }
@@ -1149,6 +1154,12 @@ def _send_pack_email(to: str, token: str, exports: list[str]) -> bool:
 
 @app.post("/r/{token}/notify")
 def notify(request: Request, token: str, email: str = Form("")):
+    # Throttle before anything else, namespaced so notify traffic and reconcile
+    # traffic do not consume each other's per-identity budget. Without this the
+    # route was the service's only unthrottled write: 10,000 leads rows in 25s,
+    # token free from the unauthenticated /reconcile (vuln-0001).
+    if not _rate_ok(f"notify:{_client_ip(request)}"):
+        raise HTTPException(429, "Too many requests from this connection.")
     with _conn() as c:
         row = c.execute("SELECT tally_csv, gst_csv, tds1035_csv FROM runs "
                         "WHERE run_token = ?", (token,)).fetchone()

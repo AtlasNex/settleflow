@@ -12,6 +12,7 @@ from __future__ import annotations
 import html as _html
 import ipaddress
 import re
+from email import utils as _email_utils
 
 # ---------------------------------------------------------------------------
 # Input decoding
@@ -258,11 +259,23 @@ def valid_email(value: str) -> str | None:
 
     Deliberately strict at the trust boundary: we only store something that is
     actually an email. No trimming tricks, no unicode normalisation.
+
+    The address does not stay a plain string downstream: it goes in the message's
+    ``To`` header, and smtplib derives the SMTP envelope from that header with
+    ``email.utils.getaddresses``, which SPLITS ON COMMAS. A value that reads as
+    one address here (``buyer@x.com,root``) would become several RCPT TO commands
+    on the wire (verified: two real Postfix deliveries from one submission), so
+    the value must survive that same round-trip as exactly one, unchanged mailbox.
     """
     candidate = (value or "").strip().lower()
     if not candidate or len(candidate) > MAX_EMAIL_LEN:
         return None
-    return candidate if _EMAIL_RE.match(candidate) else None
+    if not _EMAIL_RE.match(candidate):
+        return None
+    parsed = _email_utils.getaddresses([candidate])
+    if len(parsed) != 1 or parsed[0][1] != candidate:
+        return None
+    return candidate
 
 
 # ---------------------------------------------------------------------------
