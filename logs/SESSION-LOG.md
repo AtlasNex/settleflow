@@ -730,3 +730,40 @@ Sanjay's call: "Run on any free llm from nous. with long context and smart one."
   ATL-218 blocked (owner-gated, now including the Portal API key), ATL-230 (rename) still deferred
   behind the real-money trial.
 - Cold-start for the next session: `docs/PROMPT-continue-settleflow.md` (updated for this close).
+
+## 2026-09-13 — Session 18 (ATL-242: all twelve findings remediated) — qwen3.8-flash
+
+- **Started** from the session-17 cold-start brief. Verified the recorded way: git clean at
+  `1a9c14f`, 74/74 checks, `/health` 0.7.4 / runs 303, CI as expected, ATL-242 todo, D-41 read.
+- **Did:** remediated ALL 12 Strix findings in five commits (`b5122b5`, `610b3be`, `7ea65ea`,
+  `7437518`, `8cf4d3d`, +D-42 `a200656`), pushed. Highlights and the two design corrections:
+  1. **The write-up's loopback gate was wrong for the repo's documented docker topology** — with
+     userland port-mapping every container-side peer is the bridge gateway (private, constant),
+     so a loopback-only gate collapses all clients into one shared bucket. Shipped rule: CCI is
+     trusted for an INTERMEDIARY peer (loopback *or* private — identical outcome on the live
+     systemd+loopback box), a public peer keys on itself. Verified on the box that prod is
+     settleflow.service on 127.0.0.1:8093 (NOT docker — compose is a dev artifact). D-42.
+  2. **The derived-work ceiling is a line count, not a byte count** (`MAX_STATEMENT_ROWS=200k`,
+     env-tunable): 8MB/250k rows sat INSIDE the old caps and cost ~900MB/~72MB-persisted. Sync
+     handler + 2-slot semaphore: health worst 594ms during a 150k-row reconcile (was 6.3s stall).
+  3. vuln-0012 got real ceilings incl. the 40MP raster guard computed BEFORE get_pixmap; the
+     39KB/100-page bomb Strix measured at 125s is refused in <1ms.
+- **Verified:** self-check 74→77 (all assert-based, one runnable: `python tests/test_matching.py`);
+  every fix had a LIVE gate against a locally started instance (rate-limit matrices, notify
+  throttle + prune, the full 12-case vuln-0003 PoC matrix with 0 unhandled server log lines,
+  the served-CSV formula defusal, the flood->rejection behaviour). `hermes verify --skip-start`
+  ok; port 8000 clear before/after. CI green on the pushed head.
+- **Process notes (each already cost time once):** the patch tool mangled a `"\r\n"` literal in
+  a test (known trap — repaired by byte-exact execute_code); a `&&`-chained commit slipped past
+  a piped test failure (the pipeline exit-code trap — the follow-up commit restored honesty,
+  amended before push, nothing broken shipped); `--content-file` needs a same-drive path.
+- **Not done (and why):** the verifying Strix RE-scan (needs the owner-gated Nous
+  `NOUS_API_KEY`; Security Scan red = LLM CONNECTION FAILED, i.e. no scan happened — per D-38
+  read run.json, not the colour); the 0.7.5 deploy (session-17 brief says ask again — awaiting
+  Sanjay's go); a compose/systemd MemoryLimit (prod box has 17GB available, 2 slots x ~900MB
+  worst-case fits; revisit at scale).
+- **Board:** ATL-242 in_review with the full remediation ledger comment (12-row table, evidence
+  per finding). ATL-218 unchanged (blocked, owner-gated, now the gate for the re-scan too).
+- **State at close:** repo clean at `a200656`, pushed; live still 0.7.4 (303+ runs) with canary
+  green; next unit = Sanjay's 0.7.5 deploy go + the Portal key, then the re-scan as the gate for
+  a second deploy.
