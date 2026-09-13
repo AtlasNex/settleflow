@@ -19,3 +19,6 @@ scripts/.deploy.env
 
 # generated intermediate for the brand raster pipeline (not shipped)
 saas/static/favicon-src.png
+
+# board/release scratch files
+.atl-*.tmp.md
