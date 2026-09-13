@@ -19,14 +19,24 @@ then `MASTER-PLAN.md`, then `docs/ARCHITECTURE.md`.
 - Money docs: `docs/MONETIZATION.md` (deep-research) + `docs/COMMERCIAL.md` (Sidekiq
   licensing) + `funding.json` + `.github/FUNDING.yml`
 
-## Current state (2026-09-11)
+## Current state (2026-09-13)
 
 ### ⚠️ READ THIS FIRST — where the session ended
 
-**v0.7.4 IS DEPLOYED and live (2026-09-11, session 17, ATL-246).** `https://settleflow.atlasnex.com/health`
-→ `version 0.7.4`, runs 173+. The live XFF rate-limit bypass is CLOSED (`pick_client_ip` CCI-only is
-on the box), the DB-overwrite deploy bug is off the server, and the run-count tripwire is armed.
-Rollback: `bash scripts/rollback.sh latest` (backup `20260911-142122`).
+**v0.7.5 IS LIVE (2026-09-13, session 19): the ATL-242 deploy→remediate→deploy sequence is
+COMPLETE.** `https://settleflow.atlasnex.com/health` → `version 0.7.5`, runs 321+. The launch
+sweep also shipped with it: UI rebuilt to computed WCAG 2.2 AA (0 axe violations on every page,
+both schemes, verified on the public site), brand assets (logo/favicon/OG card/banner), README
+rewrite, CHANGELOG + USER-GUIDE + UI-AUDIT docs, packaging fixed (PEP 639: the `License ::`
+classifier BREAKS the build now — expression only), tag `v0.7.5` pushed, CI green. Rollback:
+`bash scripts/rollback.sh latest` (backup `20260913-004216`).
+
+**What is left (unchanged):** (1) the verifying Strix RE-SCAN — blocked on the owner-gated
+`NOUS_API_KEY` (ATL-218): create at portal.nousresearch.com/api-docs, set as repo secret, flip
+`security.yml` to `openai/z-ai/glm-5.3` + `LLM_API_BASE: https://inference-api.nousresearch.com/v1`
+(~85M tokens/scan, subscription-billed); (2) PyPI upload + name reservation — Sanjay's call;
+(3) **the real-money trial** — one real reconciliation for one real CA/fintech, the only thing
+that decides the venture (ATL-230 rename deliberately behind it).
 
 **The CF-Connecting-IP premise is SETTLED (ATL-244, D-41):** a caller CANNOT supply CCI through the
 tunnel — the edge 403s (error 1000) any request carrying one, before it reaches cloudflared.

@@ -767,3 +767,42 @@ Sanjay's call: "Run on any free llm from nous. with long context and smart one."
 - **State at close:** repo clean at `a200656`, pushed; live still 0.7.4 (303+ runs) with canary
   green; next unit = Sanjay's 0.7.5 deploy go + the Portal key, then the re-scan as the gate for
   a second deploy.
+
+## 2026-09-13 — Session 19 (launch sweep + the second deploy) — qwen3.8-flash
+
+Sanjay's order: "Make it completely production ready, full sweep top to bottom, the web UI is
+whack (contrast), detailed documentation, GitHub repo top grade — icons, images, all." Tracked
+as ATL-251 (high, in_progress → done this session).
+
+- **The contrast complaint was real and it was dark-mode status colours**: `.ok/.warn/.danger`
+  had no dark overrides — 2.54–3.59:1 on `#131313`, and those classes carry the product's
+  meaning (matched/exception counts). Full CSS token rewrite; every pair now passes WCAG 2.2 AA
+  by COMPUTED ratio (math + tables in `docs/UI-AUDIT.md`). axe-core 4.10.2 in Chromium: **0
+  violations on 9 page types × both schemes, locally AND against the live public site** after
+  deploy. Also: focus-visible rings, styled file buttons, `<main>` landmarks, stale index copy
+  fixed (all five gateways are wired — the page still said "not wired yet").
+- **Brand assets built, not stubbed**: logo/favicon (SVG + real .ico 16/32/48 + PNG), 1200×630
+  OG share card, README banner, three REAL app screenshots (asset pipeline drives a live server
+  through a real reconcile). Two vision-review passes (Gemini); the second flagged six defects
+  — all fixed and re-confirmed, verdict SHIP. One correction the reviewer got wrong (claimed the
+  dark header lacks the tick — it is present in `_brand.html`; raster source is the same vector).
+- **Repo top-grade**: README launch rewrite (banner, badges, screenshots, honest limits),
+  `CHANGELOG.md` created, `docs/USER-GUIDE.md` (60-second tour, file guide, reading results),
+  `docs/UI-AUDIT.md`; pyproject fixed (keywords/classifiers/URLs/py.typed + PEP 639 — the
+  `License ::` classifier now BREAKS the build and was removed); marketing audit moved to
+  `docs/`; repo description/homepage/10 topics set via `gh`. Wheel built and metadata verified.
+- **DEPLOYED v0.7.5 (ATL-242 sequence complete)**. Sanjay's message was the go. `bash
+  scripts/deploy.sh` exit 0 AND everything verified externally: `/health` → 0.7.5 runs 321
+  (never dropped), origin greps confirm `_work_slots`×3, `GLOBAL_RATE_LIMIT`×4,
+  `MAX_STATEMENT_ROWS`×3, peer-rule×2, version 0.7.5 on disk; `/static/*` serving (og-image
+  200/72KB, favicon.ico 302→svg), laptop watchdog canary silent-pass, live axe sweep clean.
+  Backup `/opt/settleflow-backups/20260913-004216.tar.gz`; rollback `bash scripts/rollback.sh
+  20260913-004216`. Tag `v0.7.5` pushed; CI green on `4237e34`.
+- **Process notes**: `python -m build` fails on sdist metadata in this environment (use
+  `pip wheel --no-deps`); pip `$TEMP` resolves to git-bash `/tmp` (invisible to native python —
+  pass native Temp paths explicitly); background terminal here rejects `notify=true` (schema
+  mismatch — foreground + long timeout instead).
+- **Not done (honest):** verifying Strix RE-SCAN still gated on the Nous `NOUS_API_KEY`
+  (ATL-218); PyPI upload + name reservation deliberately untouched (Sanjay's call);
+  real-money trial (ATL-230 and the venture question) unchanged.
+- **Board:** ATL-242 → done (fixes shipped + independently verified), ATL-251 → done.
