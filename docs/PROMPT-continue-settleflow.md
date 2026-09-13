@@ -13,15 +13,16 @@ settlement-reconciliation engine: a zero-dependency MIT Python core plus a thin 
 `https://settleflow.atlasnex.com`. It matches gateway settlements against bank statements and
 produces the workpapers a finance team files (Tally CSV, GST worksheet, TDS 1035).
 
-**State change since the last cold-start: v0.7.4 IS DEPLOYED (2026-09-11, ATL-246, Sanjay
-authorised).** The four things left, in priority order:
+**State change since the last cold-start: ATL-242 IS REMEDIATED (2026-09-13, session 18, all 12
+findings, pushed at `6569162`, issue in_review).** D-40's `deploy → remediate → deploy` now needs
+its SECOND deploy. The things left, in priority order:
 
-1. **Remediate the 12 Strix findings — ATL-242** (1 high, 5 medium, 5 low, 1 info), then deploy
-   again (D-40's `deploy → remediate → deploy` is mid-flight: deploy ✅ done at 0.7.4). Order:
-   vuln-0002 first (bound the work derived from one upload — the real remaining DoS: ~7 s stall,
-   ~881 MB peak, ~72 MB durable DB per in-limits 8.5 MB request), then 0001/0011 (`/notify` is
-   unrated and unpruned), then 0005/0007/0009, then the rest. Full detail + durable copy of every
-   write-up: `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/`.
+1. **Deploy 0.7.5** — the session-17 brief said: "the sequence is already authorised in shape;
+   say go again anyway." Say go, then `bash scripts/deploy.sh` (same verified-externally ritual
+   as ATL-246: `/health` version+runs, origin greps, backup, canary). The fixes ride on
+   `6569162`: peer-aware rate-limit identity + global window, notify throttle+prune, one-mailbox
+   email, sync reconcile + row/concurrency caps, formula-initiator set, money/date/epoch bounds,
+   PDF/OCR ceilings. D-42 records the design decisions. Self-check is 77 checks now.
 2. **The security gate needs a Nous Portal API key — owner-gated on Sanjay, one click.** He directed
    "any free LLM from Nous, long context, smart" after CommandCode ran dry. **Already verified with
    the portal OAuth JWT: `z-ai/glm-5.3` on `https://inference-api.nousresearch.com/v1` returns HTTP
@@ -70,12 +71,14 @@ authorised).** The four things left, in priority order:
 
 - **Repo:** `E:/Sanjay Files/StartUp/open source/settleflow` (Windows, git-bash). Branch `master`.
   Public: `AtlasNex/settleflow`.
-- **Live:** `https://settleflow.atlasnex.com` — **v0.7.4**, 173+ runs, retention 30 days.
+- **Live:** `https://settleflow.atlasnex.com` — **v0.7.4**, 303+ runs, retention 30 days. The
+  remediated build (ATL-242, 12 fixes) is pushed but NOT deployed yet — 0.7.5 is pending.
 - **Board:** Multica project **SettleFlow** `1e5c2be2-9967-46b5-8958-4275b73b6ad5`, agent **Hermes PM**
   `a1a9bdd5-f9b8-4505-854a-a4f943a6b17f`. CLI: `multica`.
-  ATL-244 done (probe) · ATL-246 done (deploy) · **ATL-242 todo (findings — the next work)** ·
-  ATL-234/235/237/238/241 in_review (closed loops from session 16) · ATL-218 blocked (owner-gated;
-  now includes the Nous Portal API key) · ATL-230 todo (rename, deferred).
+  ATL-244 done (probe) · ATL-246 done (deploy) · **ATL-242 in_review (all 12 fixes pushed — the
+  remediation-ledger comment on the issue lists per-finding evidence; the full comment text also
+  lives at `C:/Users/sanja/.multica-tmp/atl242-ledger.md`)** · ATL-234/235/237/238/241 in_review ·
+  ATL-218 blocked (owner-gated; includes the Nous Portal API key) · ATL-230 todo (rename, deferred).
 - **Review reports (OUTSIDE the repo — abuse write-ups, repo is public):**
   `E:/Sanjay Files/StartUp/open source/settleflow-review-2026-09-11-v2.md` (current) / `-v1.md` (old).
 - **Strix findings + the CCI/XFF probe evidence, durable copies (CI artifacts expire):**
@@ -96,10 +99,10 @@ authorised).** The four things left, in priority order:
 
 ```bash
 cd "E:/Sanjay Files/StartUp/open source/settleflow"
-git log --oneline -3 && git status --short          # expect clean at f36aae4+ (or later)
-python tests/test_matching.py                        # expect: all 74 checks passed
-curl -s https://settleflow.atlasnex.com/health       # expect version 0.7.4, runs >= 173
-gh run list --limit 3                                # CI green; Security Scan red ONLY on credits
+git log --oneline -3 && git status --short          # expect clean at 6569162+ (or later)
+python tests/test_matching.py                        # expect: all 77 checks passed
+curl -s https://settleflow.atlasnex.com/health       # expect version 0.7.4, runs >= 303 (until 0.7.5 ships)
+gh run list --limit 3                                # CI green; Security Scan red ONLY on model access
 
 # then verify state the recorded way (never a full verify):
 hermes verify --skip-start --json                    # expect ok:true; port 8000 clear before+after
@@ -108,8 +111,11 @@ hermes verify --skip-start --json                    # expect ok:true; port 8000
 multica issue get ATL-242 --output json | head -40
 ```
 
-Then start ATL-242: read `vuln-0002.md` first, fix, self-check, move down the board order. If the
-Nous key exists by then, wire it into `security.yml` and let the re-scan be the second deploy's gate.
+Then: ask for the 0.7.5 deploy go (or act on it if given), bump 0.7.4→0.7.5 in pyproject +
+`settleflow/__init__.py` in a release commit, `bash scripts/deploy.sh`, verify externally
+(/health shows 0.7.5, runs never drop, origin grep for `pick_client_ip` + `_work_slots` +
+`GLOBAL_RATE_LIMIT`), canary, done. If the Nous key exists by then, wire it into `security.yml`
+and let the re-scan judge the remediation.
 
 ---
 
@@ -164,7 +170,10 @@ Nous key exists by then, wire it into `security.yml` and let the re-scan be the 
 
 ## THE TWO QUESTIONS FOR SANJAY THIS TIME
 
-1. **The Nous Portal API key** (one click): create at portal.nousresearch.com/api-docs, give it to
-   Hermes — then the gate can run and ATL-242's re-scan has a judge. Budget the ~85M-token scan.
-2. **When the ATL-242 fixes land:** deploy 0.7.5 immediately after (the sequence is already
-   authorised in shape; say go again anyway).
+1. **Deploy go for 0.7.5** (the second half of D-40's authorised sequence — one word).
+2. **The Nous Portal API key** (one click, gates the verifying re-scan): create at
+   portal.nousresearch.com/api-docs, give it to Hermes — store as repo secret `NOUS_API_KEY`,
+   flip `.github/workflows/security.yml` to `openai/z-ai/glm-5.3` +
+   `LLM_API_BASE: https://inference-api.nousresearch.com/v1`. Budget ~85M tokens (subscription-
+   billed). The first re-scan that COMPLETES is both the ATL-242 verification and the still-
+   unproven exit-2 gate branch's acceptance test.

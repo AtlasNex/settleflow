@@ -24,9 +24,13 @@ settleflow/
 │   ├── __main__.py         # the CLI: python -m settleflow reconcile ...
 │   └── schemas.py          # ColumnMap, BankColumnMap, ReconColumnMap, *_MAPS, load_* helpers
 ├── saas/
-│   ├── app.py              # FastAPI: /reconcile, /r/<token>, /r/<token>/export/*, /health
-│   ├── helpers.py          # stdlib-only helpers (decoding, column guess, rate-limit identity)
-│   ├── templates/          # index.html, results.html, page.html, error.html (Jinja2)
+│   ├── app.py              # FastAPI: /reconcile (sync, work-capped), /r/<token>,
+│   │                       #   /r/<token>/export/*, /health, /static (brand assets)
+│   ├── helpers.py          # stdlib-only helpers (decoding, column guess,
+│   │                       #   peer-aware rate-limit identity, one-mailbox email)
+│   ├── templates/          # index.html, results.html, page.html, error.html,
+│   │                       #   _head/_style/_brand/_footer partials (Jinja2)
+│   ├── static/             # logo/favicon/OG card/banner + real UI screenshots
 │   └── requirements.txt    # fastapi, uvicorn, jinja2, python-multipart
 └── tests/
     └── test_matching.py    # assert-based self-check
@@ -124,9 +128,18 @@ All stdlib `csv` + `Decimal`.
 
 ## SaaS layer (saas/)
 
-FastAPI app over the core. `POST /reconcile` parses an uploaded settlement file (Razorpay
-settlements or recon JSON) + bank CSV, runs the matcher + classifier, persists the run to
-sqlite3, and serves generated CSVs. Deliberately thin: no ORM, no auth, no user model.
+FastAPI app over the core. `POST /reconcile` parses an uploaded settlement file
+(Razorpay settlements or recon JSON, plus the other wired kinds) + bank CSV, runs
+the matcher + classifier, persists the run to sqlite3, and serves generated CSVs.
+Deliberately thin: no ORM, no auth, no user model. Since 0.7.5 the resource
+guards are part of the architecture, not bolted on: per-identity rate limit keyed
+on the tunnel peer rule (helpers.pick_client_ip + D-41), an identity-independent
+global window, `MAX_STATEMENT_ROWS` (bound the derived work, not the bytes), a
+2-slot concurrency semaphore, and a synchronous reconcile handler so heavy work
+never touches the event loop. Every bound is an env-tunable constant. The UI is
+WCAG 2.2 AA by computed contrast (`docs/UI-AUDIT.md`), brand assets under
+`saas/static/` served from `/static` (public, cacheable — deliberately outside
+the no-store run paths).
 
 ## Data flow
 

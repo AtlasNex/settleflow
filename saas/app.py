@@ -46,6 +46,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -215,6 +216,15 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# Brand assets (logo/favicon/og-image). Public, cacheable, contains no user
+# data — deliberately OUTSIDE the no-store paths below.
+app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return RedirectResponse("/static/favicon.svg", status_code=302)
 
 
 @app.middleware("http")

@@ -5,6 +5,8 @@
 {% include "_style.html" %}
 </head>
 <body>
+<main id="content">
+  {% include "_brand.html" %}
   <h1>Reconciliation result</h1>
   <p class="muted" style="margin-top:0">
     {{ kind }} · {% if created %}{{ created.strftime('%d %b %Y, %H:%M UTC') }}{% else %}just now{% endif %}
@@ -122,6 +124,7 @@
     <a href="/">upload page</a> and name the columns under Advanced.
   </p>
 
+</main>
 {% include "_footer.html" %}
 </body>
 </html>

@@ -5,9 +5,11 @@
 {% include "_style.html" %}
 </head>
 <body>
-  <p style="margin:0 0 1rem"><a href="/">← SettleFlow</a></p>
+<main id="content">
+  {% include "_brand.html" %}
   <h1>{{ heading }}</h1>
   {{ body_html | safe }}
+</main>
 {% include "_footer.html" %}
 </body>
 </html>

@@ -72,10 +72,14 @@ curl -i -X POST http://127.0.0.1:8091/reconcile \
 
 ## What is NOT yet covered (known gaps)
 
-- Cashfree two-section recon (needs a dedicated parser).
-- PhonePe / Juspay parser data (ambiguities documented in `docs/SCHEMAS.md`).
-- Real (non-doc) vendor files with dirty columns (extra headers, blank rows).
-- Performance on large files (tens of thousands of rows).
-- SaaS auth, multi-user, hosting (later-stage concerns, out of scope for the open core).
+- Bank-statement PDFs beyond the SBI layouts (no verified public samples yet).
+- IDFC statements and Cashfree's plain (non-recon) settlements export — unwired
+  by design (`docs/CONSTRAINTS.md` #2), so there is nothing to test.
+- Real (non-doc) vendor files with dirty columns beyond the anonymised fixtures.
+- Multi-worker behaviour of the hosted rate limiter (per-process by design;
+  the D-42 comment states the upgrade path: move counters into sqlite).
 
-Do not claim these are tested. Add a check the moment one is built.
+Since 0.7.5 the suite also covers: the Strix-finding fixes (rate-limit identity
+matrix incl. IPv6 canonicalization, notify throttle, one-mailbox email, formula
+initiator set, money/date/epoch bounds, narration linearity, PDF/OCR resource
+ceilings). Do not claim anything else is tested. Add a check the moment one is built.

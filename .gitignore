@@ -16,3 +16,6 @@ saas/upload_*.csv
 # public and the origin IP is not in public DNS, so publishing it would hand out a
 # route that bypasses the Cloudflare rules in front of the origin.
 scripts/.deploy.env
+
+# generated intermediate for the brand raster pipeline (not shipped)
+saas/static/favicon-src.png

@@ -1,0 +1,3 @@
+include settleflow/py.typed
+recursive-include saas/templates *.html
+recursive-include saas/static *.svg *.png *.ico

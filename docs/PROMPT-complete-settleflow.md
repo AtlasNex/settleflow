@@ -29,7 +29,7 @@ Take the SettleFlow repo from "working engineering deployment" to a **launchable
 2. `AGENTS.md` — working rules (one change per request, read every diff, verify don't assert).
 3. `docs/HANDOVER.md` — current state and gotchas.
 4. `docs/ARCHITECTURE.md` + `docs/FLOW.md` — trace the real flow before you change it.
-5. `marketing-audit-settleflow-2026-08-30.md` — the 38/100 audit. Its fix list is your Phase 3 spec.
+5. `docs/marketing-audit-2026-08-30.md` — the 38/100 audit. Its fix list is your Phase 3 spec.
 
 Non-negotiable constraints you must not break: money is `Decimal` never `float`; paise→rupee only inside parsers; UTR normalization is alphanumeric+uppercase only; **never fabricate a vendor schema** (raise instead); deterministic matching; **zero runtime deps in the core**; **no test framework** (assert-based self-check is the standard); license stays MIT; never force-push or rewrite published history.
 

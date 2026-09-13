@@ -5,6 +5,8 @@
 {% include "_style.html" %}
 </head>
 <body>
+<main id="content">
+  {% include "_brand.html" %}
   <h1>SettleFlow</h1>
 
   {# Audience named, fear answered, licence stated. The previous sub-head described
@@ -16,8 +18,9 @@
     list, and Tally / GST / TDS code-1035 workpapers.
   </p>
   <p class="lead muted">
-    Open source (MIT). Your files are used for this one reconciliation only; the run record
-    is deleted after 30 days. No account, no card.
+    Razorpay, PayU, Cashfree, PhonePe and Juspay exports; HDFC, SBI, ICICI, Axis,
+    Kotak, PNB and DBS statements. Open source (MIT). Your files are used for this
+    one reconciliation only; the run record is deleted after 30 days. No account, no card.
   </p>
 
   <form action="/reconcile" method="post" enctype="multipart/form-data">
@@ -94,11 +97,14 @@
   </div>
 
   <p class="muted">
-    Currently supported: Razorpay settlement exports, and bank statements from
-    HDFC, SBI, ICICI, Axis, Kotak, PNB and DBS (plus SBI PDFs). Cashfree, PhonePe,
-    Juspay and PayU are not wired yet — see <a href="/about">About</a>.
+    Currently supported: settlement exports from <strong>Razorpay</strong> (API JSON and
+    CSV), <strong>PayU</strong>, <strong>Cashfree</strong>, <strong>PhonePe</strong> and
+    <strong>Juspay</strong>, and bank statements from <strong>HDFC, SBI, ICICI, Axis,
+    Kotak, PNB and DBS</strong> (plus SBI PDFs). A format with no verified public sample
+    is refused, never guessed — the open ones are listed on <a href="/about">About</a>.
   </p>
 
+</main>
 {% include "_footer.html" %}
 </body>
 </html>

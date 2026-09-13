@@ -4,13 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "settleflow"
-version = "0.7.4"
-description = "Open-source UPI/NPCI settlement reconciliation library for India"
+version = "0.7.5"
+description = "Open-source UPI settlement reconciliation: gateway payout file vs bank credit, with Tally/GST/TDS-1035 workpapers. Stdlib-only core."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "Sanjay R.U. Kumar" }]
-dependencies = []
+authors = [{ name = "Sanjay R.U. Kumar", email = "sanjay@atlasnex.com" }]
+keywords = [
+    "upi", "settlement-reconciliation", "razorpay", "payu", "cashfree",
+    "phonepe", "juspay", "bank-statement", "tally", "gst", "tds", "194o",
+    "fintech", "india", "accounting", "npci",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
 
 [project.optional-dependencies]
 # The thin SaaS layer (saas/) only. The library itself stays stdlib-only
@@ -22,6 +39,13 @@ pdf = ["pymupdf>=1.24"]
 # Optional OCR for SCANNED (image-only) PDFs (settleflow.ocr). pymupdf rasterises
 # pages; the Tesseract engine is invoked via its CLI (system binary, not pip).
 ocr = ["pymupdf>=1.24"]
+
+[project.urls]
+Homepage = "https://settleflow.atlasnex.com"
+Repository = "https://github.com/AtlasNex/settleflow"
+Documentation = "https://github.com/AtlasNex/settleflow/tree/master/docs"
+Issues = "https://github.com/AtlasNex/settleflow/issues"
+Changelog = "https://github.com/AtlasNex/settleflow/blob/master/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["settleflow*"]
