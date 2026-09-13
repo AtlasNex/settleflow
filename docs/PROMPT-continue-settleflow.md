@@ -15,28 +15,21 @@ produces the workpapers a finance team files (Tally CSV, GST worksheet, TDS 1035
 
 **State change since the last cold-start: 0.7.5 IS DEPLOYED (2026-09-13, session 19) and the
 launch sweep shipped with it (UI WCAG-AA, brand assets, docs, packaging).** The
-deploy→remediate→deploy sequence is COMPLETE. What is left, in priority order:
+deploy→remediate→deploy sequence is COMPLETE. The Strix Security Scan workflow was **retired**
+the same day (D-43): ~85M tokens/scan, no funded provider, permanently-red gate — its value was
+already banked (the 12 findings, all fixed with live-gated evidence in 0.7.5). What is left, in
+priority order:
 
-1. **The verifying Strix RE-SCAN** — the only unverified claim left on ATL-242: read
-   `strix_runs/*/vulnerabilities.json` on a COMPLETED scan and confirm the 12 findings do not
-   reappear. Gated on the owner-gated Nous key (item 2).
-2. **The security gate needs a Nous Portal API key — owner-gated on Sanjay, one click.** He directed
-   "any free LLM from Nous, long context, smart" after CommandCode ran dry. **Already verified with
-   the portal OAuth JWT: `z-ai/glm-5.3` on `https://inference-api.nousresearch.com/v1` returns HTTP
-   200, `finish_reason=tool_calls`, correct tool args — exactly Strix's contract** (D-39-compatible:
-   non-thinking model). A 1-h JWT cannot live in CI and the refresh token rotates on use, so CI
-   needs the static key: Sanjay creates it at portal.nousresearch.com/api-docs → store in vault /
-   repo secret `NOUS_API_KEY` → flip `.github/workflows/security.yml` env to
-   `STRIX_LLM: openai/z-ai/glm-5.3`, `LLM_API_BASE: https://inference-api.nousresearch.com/v1`,
-   `LLM_API_KEY: ${{ secrets.NOUS_API_KEY }}` (same shape as the CommandCode wiring in `b14c87a`).
-   Cost honesty: the last `quick` scan was 85.5M tokens; on Nous "free" means billed to the
-   subscription, not unmetered. The first scan that completes WITH findings is the acceptance test
-   for the still-unproven exit-2 gate branch.
-3. **ATL-218 — owner-gated, only Sanjay:** PyPI account+token; Proton SMTP creds; Cloudflare
-   AI-crawl toggle; real Juspay/PhonePe/IDFC samples.
-4. **The real-money trial — the only thing that decides the venture:** run ONE real reconciliation
-   offline for one real CA/fintech and hand back the output. Nothing has ever met real money. The
-   Conjunction rename (ATL-230) is deliberately deferred behind it.
+1. **ATL-218 — owner-gated, only Sanjay:** PyPI account + API token (name verified FREE; sdist
+   + wheel build clean — one `twine upload` away); Proton SMTP creds (the `SETTLEFLOW_SMTP_*`
+   env on the box makes the lead-email feature real); Cloudflare AI-crawl toggle; real
+   Juspay/PhonePe/IDFC sample files.
+2. **The real-money trial — the only thing that decides the venture:** run ONE real
+   reconciliation offline for one real CA/fintech and hand back the output. Nothing has ever met
+   real money. The Conjunction rename (ATL-230) is deliberately deferred behind it.
+3. **If a security gate is ever wanted again:** don't resurrect CI Strix on a free tier. Run one
+   funded scan manually at a milestone and keep the exit-code/artifact discipline from the old
+   `security.yml` (it is one commit back: `git show 3407a5c:.github/workflows/security.yml`).
 
 ---
 
@@ -99,7 +92,7 @@ cd "E:/Sanjay Files/StartUp/open source/settleflow"
 git log --oneline -3 && git status --short          # expect clean at 4237e34+ (or later)
 python tests/test_matching.py                        # expect: all 77 checks passed
 curl -s https://settleflow.atlasnex.com/health       # expect version 0.7.5, runs >= 321
-gh run list --limit 3                                # CI green; Security Scan red ONLY on model access
+gh run list --limit 3                                # CI green (the Security Scan workflow was retired 2026-09-13, D-43)
 
 # then verify state the recorded way (never a full verify):
 hermes verify --skip-start --json                    # expect ok:true; port 8000 clear before+after
@@ -109,10 +102,9 @@ multica issue get ATL-242 --output json | head -40
 multica issue get ATL-218 --output json | head -20
 ```
 
-Then: if the Nous key exists, wire it into `security.yml`
-(`STRIX_LLM: openai/z-ai/glm-5.3`, `LLM_API_BASE: https://inference-api.nousresearch.com/v1`,
-`LLM_API_KEY: ${{ secrets.NOUS_API_KEY }}`), dispatch the scan, and judge ATL-242's close-out on
-the COMPLETED scan's `vulnerabilities.json` — not on the job colour (D-38).
+Then: the board's open items are owner-gated (ATL-218: PyPI token, SMTP creds, CF crawl toggle,
+vendor samples) and the real-money trial. There is no in-repo security backlog — if a future scan
+is wanted, do it manually funded (see item 3 in MISSION above), not as a CI gate.
 
 ---
 
@@ -126,6 +118,7 @@ the COMPLETED scan's `vulnerabilities.json` — not on the job colour (D-38).
    tripwire now fails the deploy if the live run count ever drops; don't "simplify" the excludes.
 4. **A green CI security run is not "no findings"** — read `strix_runs/*/vulnerabilities.json` (D-38).
    And a red one is not "findings" — CommandCode credits was the last cause. Read `run.json` status.
+   *(Legacy: the CI scan was retired 2026-09-13, D-43 — applies again if a manual scan is ever run.)*
 5. **`scripts/canary.py` run DIRECTLY from the laptop FAILS by design** — it targets
    `127.0.0.1:8093`, which exists only on the VPS. Use the watchdog wrapper
    `C:/Users/sanja/AppData/Local/hermes/scripts/settleflow_canary.py` (public URL; silent + exit 0
@@ -173,13 +166,11 @@ the COMPLETED scan's `vulnerabilities.json` — not on the job colour (D-38).
 
 ## THE QUESTIONS FOR SANJAY THIS TIME
 
-1. **The Nous Portal API key** (one click, gates the verifying re-scan): create at
-   portal.nousresearch.com/api-docs, give it to Hermes — store as repo secret `NOUS_API_KEY`,
-   flip `.github/workflows/security.yml` to `openai/z-ai/glm-5.3` +
-   `LLM_API_BASE: https://inference-api.nousresearch.com/v1`. Budget ~85M tokens (subscription-
-   billed). The first re-scan that COMPLETES is both the ATL-242 verification and the still-
-   unproven exit-2 gate branch's acceptance test.
-2. **PyPI**: name reservation + first upload is now one `twine` command away (metadata verified
-   building clean) — still your call, per standing rule.
+1. **PyPI** (one click + one command): create an account at pypi.org, add an API token scoped to
+   the `settleflow` project (the name verified FREE 2026-09-13), then Hermes runs
+   `twine upload` — sdist + wheel both build clean today. Until then the README's
+   `pip install git+...` is the supported path.
+2. **Proton SMTP creds** (`SETTLEFLOW_SMTP_*` on the box) — the lead-email feature is coded,
+   tested against a capture server, and inert until real creds exist.
 3. **The real-money trial** — the one thing that decides the venture: one real reconciliation
    for one real CA/fintech.

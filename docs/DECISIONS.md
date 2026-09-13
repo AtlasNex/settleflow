@@ -603,3 +603,19 @@ survived because the OSS component layer is genuinely un-owned.
   run; the shipped rules are the deployment-aware generalisations, each with a live gate and a
   self-check assert.
 - **Model:** qwen3.8-flash. **Date:** 2026-09-13.
+
+### D-43: The Strix CI gate is retired — a permanently-red gate is worse than no gate
+
+- **Decision.** `.github/workflows/security.yml` deleted (reference wiring: `git show
+  3407a5c:.github/workflows/security.yml`); its three repo secrets removed. If a scan is wanted
+  again: fund one, run it manually at a milestone, keep the old exit-code + `run.json` discipline.
+- **Why.** One completed `quick` scan earned the tool its place once: 12 real defects (1 high,
+  5 medium) that the manual review and the 74-check self-check missed — all fixed and shipped
+  with live-gated evidence (D-38…D-42, 0.7.5). But the ongoing cost is ~85M tokens per scan with
+  no funded provider: CommandCode is bankrupted and Nous needs an owner-minted static key, so the
+  job could not run — and a red ✗ on every push that proves nothing about security trains
+  contributors and visitors to ignore red. ATL-242 closes on the per-fix live gates, not on a
+  re-scan that cannot run.
+- **Rejected:** keeping the workflow "for when a key arrives" — dead CI is not a placeholder,
+  it is noise on a public repo's landing page.
+- **Model:** qwen3.8-flash. **Date:** 2026-09-13.

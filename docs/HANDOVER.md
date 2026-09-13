@@ -31,12 +31,13 @@ rewrite, CHANGELOG + USER-GUIDE + UI-AUDIT docs, packaging fixed (PEP 639: the `
 classifier BREAKS the build now — expression only), tag `v0.7.5` pushed, CI green. Rollback:
 `bash scripts/rollback.sh latest` (backup `20260913-004216`).
 
-**What is left (unchanged):** (1) the verifying Strix RE-SCAN — blocked on the owner-gated
-`NOUS_API_KEY` (ATL-218): create at portal.nousresearch.com/api-docs, set as repo secret, flip
-`security.yml` to `openai/z-ai/glm-5.3` + `LLM_API_BASE: https://inference-api.nousresearch.com/v1`
-(~85M tokens/scan, subscription-billed); (2) PyPI upload + name reservation — Sanjay's call;
-(3) **the real-money trial** — one real reconciliation for one real CA/fintech, the only thing
-that decides the venture (ATL-230 rename deliberately behind it).
+**What is left (unchanged):** (1) PyPI upload + name reservation — Sanjay's call (the name
+verified FREE on PyPI 2026-09-13; sdist + wheel both build clean); (2) **the real-money trial** —
+one real reconciliation for one real CA/fintech, the only thing that decides the venture
+(ATL-230 rename deliberately behind it). ~~Verifying Strix re-scan~~ — **dropped**: the Security
+Scan workflow was retired the same day (D-43): ~85M tokens/scan with no funded provider meant a
+permanently-red gate that proves nothing; its one completed scan already paid for itself (the 12
+findings, all fixed in 0.7.5 with live-gated evidence).
 
 **The CF-Connecting-IP premise is SETTLED (ATL-244, D-41):** a caller CANNOT supply CCI through the
 tunnel — the edge 403s (error 1000) any request carrying one, before it reaches cloudflared.
@@ -46,33 +47,22 @@ origin is ever exposed directly, so deploys must keep the 127.0.0.1 bind + tunne
 is exactly why the old live build was bypassable and the deploy mattered. Evidence:
 `E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/PROBE-cf-connecting-ip.md`.
 
-**Next unit of work (D-40, mid-flight): remediate ATL-242, then deploy again.** Order on the board:
-vuln-0002 (bound the work derived from an upload — the real remaining DoS), 0001/0011 (/notify is
-unrated and unpruned), 0005/0007/0009, the rest.
+**D-40 sequence COMPLETE (2026-09-13):** all 12 ATL-242 findings remediated (peer-aware
+rate-limit identity + global window, notify throttle+prune, one-mailbox email, sync reconcile +
+row/concurrency caps, formula-initiator set, money/date/epoch bounds, PDF/OCR ceilings —
+per-finding evidence in the ATL-242 board ledger and `docs/UI-AUDIT.md`/`CHANGELOG.md`), and
+v0.7.5 deployed with external verification.
 
-**The security gate is still unfunded, but the provider is chosen and half-proven:** Sanjay directed
-"any free LLM from Nous, long context, smart". Verified with the portal OAuth JWT:
-`z-ai/glm-5.3` on `https://inference-api.nousresearch.com/v1` returns HTTP 200 with
-`finish_reason=tool_calls` — Strix's contract (D-39-compatible). What is missing is a **durable Nous
-Portal API key** (the OAuth JWT expires in 1 h and the refresh token rotates — CI cannot use it;
-`NOUS_API_KEY` is the supported static credential). Owner-gated on Sanjay:
-create the key at portal.nousresearch.com/api-docs → then flip `security.yml` to
-`STRIX_LLM: openai/z-ai/glm-5.3`, `LLM_API_BASE: https://inference-api.nousresearch.com/v1`,
-`LLM_API_KEY: ${{ secrets.NOUS_API_KEY }}`. A `quick` scan cost 85.5M tokens on CommandCode; on Nous
-"free" means billed to the subscription, not unmetered — budget the first scan as the acceptance test
-for the still-unproven exit-2 path.
-
-**Strix is the new verification gate, but it is currently OUT OF CREDITS.** It found 12 issues
-(1 high, 5 medium) that our own 74-check self-check and the manual review both missed — including a
-latent `NameError` in a shipped SBI parser. But a single `quick` scan consumed **85.5M tokens**
-(557 requests; 84.8M input, 83.5M of it cached) and exhausted the CommandCode account: the next run
-died in 5 minutes with `400 "You have insufficient credits"`. **Topping up CommandCode, or moving the
-scan to another funded provider, is now an owner-gated prerequisite for the security gate.** Cost the
-scan accordingly before running it again — `quick` is not cheap.
-
-Treat a green security run as meaningful only after reading the artifacts (a run reported success
-over those 12 findings before the gate was fixed), and note the artifact expires in 30 days — a
-durable copy lives outside the repo.
+**The Strix CI gate was retired the same day (D-43).** It earned its keep once — the single
+v0.7.4 scan found the 12 real defects (1 high, 5 medium) that the manual review and the
+self-check missed, which is exactly what a second opinion is for. But one `quick` scan costs
+~85M tokens (it bankrupted CommandCode; Nous needs an owner-minted static key), so the workflow
+would stay permanently red — and a gate that cannot run is not a gate; one that always fails is
+worse than none, because it teaches everyone to ignore red. `.github/workflows/security.yml` is
+deleted (reference wiring: `git show 3407a5c:.github/workflows/security.yml`). If a scan is ever
+wanted again, fund one and run it manually at a milestone — keep the exit-code + run.json
+discipline from the old file. The durable artifact copy of every finding lives at
+`E:/Sanjay Files/StartUp/open source/strix-settleflow-2026-09-11/`.
 
 ### Session 16 — the end-to-end review, every finding fixed, and Strix as a second opinion
 
