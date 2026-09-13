@@ -805,4 +805,14 @@ as ATL-251 (high, in_progress → done this session).
 - **Not done (honest):** verifying Strix RE-SCAN still gated on the Nous `NOUS_API_KEY`
   (ATL-218); PyPI upload + name reservation deliberately untouched (Sanjay's call);
   real-money trial (ATL-230 and the venture question) unchanged.
-- **Board:** ATL-242 → done (fixes shipped + independently verified), ATL-251 → done.
+- **Board:** ATL-242 done, ATL-251 done.
+- **Same-day follow-up (the "do the not-done things" turn):** Strix fully retired per Sanjay
+  (workflow + 3 secrets + laptop binary; D-43). **PyPI DONE** — name claimed, 0.7.5 + 0.7.6
+  uploaded (token via masked overlay → keychain `cred_dd03b323172e`, purged from .env);
+  clean-room `pip install settleflow` verified. **Proton SMTP DONE** — wired via
+  `/opt/settleflow/.env` (600) + systemd EnvironmentFile drop-in; notify → `delivered=1`,
+  accepted by smtp.protonmail.ch. **v0.7.6 released**: GitHub Latest + artifacts, pricing/README
+  stale PyPI caveats removed. CF AI-crawl = non-safety decision, recommended OFF (index docs).
+  **Real-money-trial leads found:** r/indianstartups 1kvjtkm ("manual reconciliation due to
+  bulk settlements from Razorpay… incredibly tedious", May-25) and r/IndiaTax 1pbtwoa (3 days a
+  month on GST recon, Dec-25) — outreach text drafted; posting is Sanjay's identity/call.
