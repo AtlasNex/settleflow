@@ -10,7 +10,7 @@ Three ways to use SettleFlow, in increasing order of control:
 | | Get started with | You get |
 |---|---|---|
 | 1. Hosted service | open [settleflow.atlasnex.com](https://settleflow.atlasnex.com) | browser upload, workpaper downloads |
-| 2. CLI | `pip install "settleflow @ git+https://github.com/AtlasNex/settleflow.git"` | the same engine, fully offline |
+| 2. CLI | `pip install settleflow` | the same engine, fully offline |
 | 3. Library | same install, then `import settleflow` | every step individually |
 
 Nothing about your data leaves your machine in options 2 and 3. The hosted

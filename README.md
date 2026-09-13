@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/runtime%20deps-none%20(stdlib)-brightgreen" alt="Zero runtime dependencies">
   <img src="https://img.shields.io/badge/WCAG-2.2%20AA-brightgreen" alt="WCAG 2.2 AA">
-  <img src="https://img.shields.io/badge/PyPI-pending-orange" alt="PyPI pending">
+  <a href="https://pypi.org/project/settleflow/"><img src="https://img.shields.io/pypi/v/settleflow" alt="PyPI"></a>
 </p>
 
 **For merchants and accountants reconciling UPI payouts against bank credits.**
@@ -39,13 +39,12 @@ closes that gap deterministically, and every match is inspectable.
 
 ## Install
 
-Not on PyPI yet — install from source (the core needs no dependencies at all):
-
 ```bash
-pip install "settleflow @ git+https://github.com/AtlasNex/settleflow.git"
+pip install settleflow
 ```
 
-Or clone and run from the repo root. Python ≥ 3.10 (CI runs 3.10–3.12).
+That's it — published on PyPI, and the core needs no dependencies at all.
+(Optional extras: `[saas]`, `[pdf]`, `[ocr]`.) Python ≥ 3.10 (CI runs 3.10–3.12).
 
 ## 60-second tour
 
@@ -135,10 +134,9 @@ The core is stdlib-only — these are opt-in and lazily imported:
 (`saas/`, deployable via Docker or plain systemd+Cloudflare-Tunnel), CI on three
 Python versions plus a boot-and-reconcile integration job, 77 assert-based checks.
 
-**Not built — don't pretend otherwise:** no PyPI release yet (name pending),
-non-SBI bank PDFs, a user model or API keys (the service is deliberately stateless
-per run), and any SLA. Pre-1.0: no API-stability promise. Legal pages in
-[docs/legal/](docs/legal/) are drafts pending professional review.
+**Not built — don't pretend otherwise:** non-SBI bank PDFs, a user model or API keys
+(the service is deliberately stateless per run), and any SLA. Pre-1.0: no API-stability
+promise. Legal pages in [docs/legal/](docs/legal/) are drafts pending professional review.
 
 ## Pricing, honestly
 

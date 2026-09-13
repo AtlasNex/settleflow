@@ -2,6 +2,17 @@
 All notable changes to SettleFlow are documented here. The engine is
 `settleflow/` (MIT library); `saas/` is the thin hosted layer.
 
+## [0.7.6] — 2026-09-13
+
+- **PyPI**: `pip install settleflow` now works — 0.7.5 was uploaded the same day, and 0.7.6
+  re-publishes with the corrected README baked in (0.7.5's package metadata still said
+  "not on PyPI yet"). The name is reserved by this release.
+- **Real email delivery live**: Proton SMTP wired into the hosted service via
+  `EnvironmentFile=/opt/settleflow/.env` (mode 600, credentials in the Windows keychain +
+  systemd drop-in on the box). Verified end-to-end: notify → `leads.delivered=1` with the
+  message accepted by smtp.protonmail.ch. The pricing page and README no longer carry the
+  "install from git / not on PyPI" caveat that is now false.
+
 ## [0.7.5] — 2026-09-13
 
 The security-sweep release: every finding from the first real Strix scan

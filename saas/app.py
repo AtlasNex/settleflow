@@ -644,10 +644,7 @@ and no trial clock — upload the two files, get the workpapers.
 **Self-hosting is free, permanently.** The engine is MIT-licensed. Run it on your
 own machine and nothing leaves your network:
 
-`pip install git+https://github.com/AtlasNex/settleflow.git`
-
-(Not on PyPI yet — installing from the repository is the supported path today, so
-that is the command shown rather than one that would fail.)
+`pip install settleflow`
 
 ## Why it is free right now
 

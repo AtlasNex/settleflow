@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "settleflow"
-version = "0.7.5"
+version = "0.7.6"
 description = "Open-source UPI settlement reconciliation: gateway payout file vs bank credit, with Tally/GST/TDS-1035 workpapers. Stdlib-only core."
 readme = "README.md"
 requires-python = ">=3.10"
